@@ -8,6 +8,62 @@
 
 const db = require('./jsonDb');
 
+// ============= MIGRATION (old format → new format) =============
+
+/**
+ * Migrate data lama (format _division single string) ke format baru (_divisions array).
+ * Dipanggil sekali saat module load. Aman kalau data sudah format baru (no-op).
+ */
+function migrateOldFormat() {
+  const allData = db.all();
+  const migrated = [];
+
+  for (const entry of allData) {
+    // Cari key dengan suffix _division (bukan _divisions, bukan _divisions_xxx_title)
+    if (!entry.ID.endsWith('_division')) continue;
+    if (entry.ID.endsWith('_divisions')) continue;
+
+    // Extract: staff_{guildId}_{userId}_division
+    const match = entry.ID.match(/^staff_(\d+)_(\d+)_division$/);
+    if (!match) continue;
+
+    const [, guildId, userId] = match;
+    const division = entry.data;
+    if (typeof division !== 'string') continue;
+
+    // Cek apakah user sudah punya key _divisions (format baru)
+    const existingDivs = db.get(`staff_${guildId}_${userId}_divisions`);
+    if (existingDivs && Array.isArray(existingDivs)) {
+      // Sudah format baru, tapi cek apakah divisi lama belum ada di array
+      if (!existingDivs.some((d) => d.toLowerCase() === division.toLowerCase())) {
+        existingDivs.push(division);
+        db.set(`staff_${guildId}_${userId}_divisions`, existingDivs);
+      }
+    } else {
+      // Belum ada format baru → buat array baru
+      db.set(`staff_${guildId}_${userId}_divisions`, [division]);
+    }
+
+    // Migrate title lama (staff_{guildId}_{userId}_title) ke format per-divisi
+    const oldTitle = db.get(`staff_${guildId}_${userId}_title`);
+    if (oldTitle) {
+      db.set(`staff_${guildId}_${userId}_${division}_title`, oldTitle);
+      db.delete(`staff_${guildId}_${userId}_title`);
+    }
+
+    // Hapus key lama
+    db.delete(entry.ID);
+    migrated.push(entry.ID);
+  }
+
+  if (migrated.length > 0) {
+    console.log(`📦 Staff directory: migrated ${migrated.length} old format entries to new format.`);
+  }
+}
+
+// Run migration on load
+migrateOldFormat();
+
 // ============= DIVISIONS =============
 
 /**
