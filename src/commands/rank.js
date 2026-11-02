@@ -17,6 +17,7 @@ module.exports = {
         .addChoices(
           { name: 'Chat Level', value: 'chat' },
           { name: 'Voice Level', value: 'voice' },
+          { name: 'Overall Level (gabungan)', value: 'overall' },
           { name: 'Both (default)', value: 'both' }
         )
     ),
@@ -63,6 +64,23 @@ module.exports = {
           { attachment: chatCard, name: 'chat-rank.png' },
           { attachment: voiceCard, name: 'voice-rank.png' },
         ],
+      });
+      return;
+    }
+
+    // Kalau type = 'overall', kirim overall card
+    if (type === 'overall') {
+      const overallData = db.getOverallData(guildId, targetUser.id);
+      const overallRank = db.getOverallRankPosition(guildId, targetUser.id);
+      overallData.rank = overallRank.rank;
+      overallData.totalUsers = overallRank.total;
+      overallData.streak = chatData.streak;
+      overallData.streakMultiplier = chatData.streakMultiplier;
+
+      const cardBuffer = await createRankCard(member, overallData, 'overall', overallData.xpNeeded);
+      await interaction.editReply({
+        content: `🌟 **Overall Rank ${targetUser.username}** (Chat Lv.${chatData.level} + Voice Lv.${voiceData.level})`,
+        files: [{ attachment: cardBuffer, name: 'overall-rank.png' }],
       });
       return;
     }

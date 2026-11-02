@@ -42,7 +42,11 @@ try {
     levelBox: { enabled: true, x: 270, y: 145, width: 160, height: 36, fontSize: 22, color: '#1b45f4' },
     typeBadge: { enabled: true, x: 436, y: 149, width: 70, height: 18, fontSize: 9 },
     decor: { showCornerAccents: true, showGrid: true, showLabels: true, showBarcode: true, showParticles: true, showDivider: true, dividerX: 125 },
-    theme: { chat: { blue: '#1b45f4', lightBlue: '#4b7bff', label: 'CHAT XP' }, voice: { blue: '#e94560', lightBlue: '#ff6b8a', label: 'VOICE XP' } }
+    theme: {
+      chat: { blue: '#1b45f4', lightBlue: '#4b7bff', label: 'CHAT XP' },
+      voice: { blue: '#e94560', lightBlue: '#ff6b8a', label: 'VOICE XP' },
+      overall: { blue: '#9b59b6', lightBlue: '#c39bd3', label: 'OVERALL XP' },
+    }
   };
 }
 
@@ -61,6 +65,11 @@ const COLORS = {
 const THEME = {
   chat: { blue: LAYOUT.theme.chat.blue, lightBlue: LAYOUT.theme.chat.lightBlue, label: LAYOUT.theme.chat.label },
   voice: { blue: LAYOUT.theme.voice.blue, lightBlue: LAYOUT.theme.voice.lightBlue, label: LAYOUT.theme.voice.label },
+  overall: {
+    blue: LAYOUT.theme.overall?.blue || '#9b59b6',
+    lightBlue: LAYOUT.theme.overall?.lightBlue || '#c39bd3',
+    label: LAYOUT.theme.overall?.label || 'OVERALL XP',
+  },
 };
 
 // ============= HELPERS =============

@@ -65,6 +65,11 @@
       "blue": "#e94560",
       "lightBlue": "#ff6b8a",
       "label": "VOICE XP"
+    },
+    "overall": {
+      "blue": "#9b59b6",
+      "lightBlue": "#c39bd3",
+      "label": "OVERALL XP"
     }
   }
 }

@@ -1,6 +1,6 @@
 const { ChannelType } = require('discord.js');
 const db = require('./database');
-const { addChatXP, addVoiceXP, addVoiceMinutes, getReward, getLevelChannel, getMultiplier, updateDailyStreak, isMilestoneLevel } = db;
+const { addChatXP, addVoiceXP, addVoiceMinutes, getReward, getLevelChannel, getMultiplier, updateDailyStreak, isMilestoneLevel, getChatData, getVoiceData, computeOverallLevel } = db;
 const { createLevelUpGIF } = require('./levelUpCard');
 
 // Track user yang sedang di voice channel
@@ -48,6 +48,9 @@ function handleMessageCreate(message) {
   if (result.leveledUp) {
     handleLevelUp(message, userId, result.newLevel, 'chat', reason);
   }
+
+  // Cek overall level up (gabungan chat + voice)
+  checkOverallLevelUp(message.guild, message.member, message.author);
 }
 
 /**
@@ -203,9 +206,94 @@ async function processVoiceLeave(guild, userId, trackKey) {
   const xpGain = Math.floor(baseVoiceXP * multiplier) + (streakInfo.bonusXP || 0);
   const result = addVoiceXP(guildId, userId, xpGain);
 
+  // Cek overall level up (gabungan chat + voice)
+  const member = guild.members.cache.get(userId);
+  if (member) {
+    checkOverallLevelUp(guild, member, member.user);
+  }
+
   if (result.leveledUp && isMilestoneLevel(result.newLevel)) {
-    const member = guild.members.cache.get(userId);
-    if (member) {
+    const savedChannelId = getLevelChannel(guildId);
+    const channel = (savedChannelId && guild.channels.cache.get(savedChannelId))
+      || guild.systemChannel
+      || guild.channels.cache.find(
+          (c) => c.type === ChannelType.GuildText && c.permissionsFor(guild.members.me)?.has('SendMessages')
+        );
+    if (channel && member) {
+      try {
+        const { createLevelUpGIF } = require('./levelUpCard');
+        const gifBuffer = await createLevelUpGIF({
+          username: member.displayName,
+          avatarURL: member.user.displayAvatarURL({ extension: 'png', size: 256 }),
+          oldLevel: result.newLevel - 1,
+          newLevel: result.newLevel,
+          type: 'voice',
+        });
+        await channel.send({
+          content: `🎉 ${member} naik ke **🎙️ Voice Level ${result.newLevel}**!${voiceReason ? ` ⚡ **${voiceReason}**` : ''}`,
+          files: [{ attachment: gifBuffer, name: 'levelup-voice.gif' }],
+        });
+      } catch (err) {
+        console.error('Gagal generate voice level up GIF:', err.message);
+        channel.send(`🎙️ **${member.displayName}** naik ke **Voice Level ${result.newLevel}**! Mantap bos!`)
+          .catch(() => {});
+      }
+    }
+  } else if (result.leveledUp) {
+    // Level naik tapi bukan milestone — tetap kasih role reward kalau ada (tanpa notif)
+    const rewardRoleId = getReward(guildId, 'voice', result.newLevel);
+    if (rewardRoleId && member) {
+      try {
+        const role = guild.roles.cache.get(rewardRoleId);
+        if (role && !member.roles.cache.has(rewardRoleId)) {
+          await member.roles.add(role);
+        }
+      } catch (err) {
+        console.error(`Gagal kasih voice role reward: ${err.message}`);
+      }
+    }
+  }
+}
+
+/**
+ * Cek apakah overall level (gabungan chat + voice) naik.
+ * Kalau naik dan milestone, kirim notif + kasih role reward 'overall'.
+ * Overall level tidak disimpan — dihitung on-the-fly dari totalXp chat + voice.
+ */
+async function checkOverallLevelUp(guild, member, user) {
+  const guildId = guild.id;
+  const userId = user.id;
+
+  const chatData = getChatData(guildId, userId);
+  const voiceData = getVoiceData(guildId, userId);
+  const overall = computeOverallLevel(chatData.totalXp, voiceData.totalXp);
+
+  // Cek overall level sebelumnya yang disimpan
+  const prevOverallLevelKey = `overall_${guildId}_${userId}_level`;
+  const dbRaw = require('./jsonDb');
+  const prevLevel = dbRaw.get(prevOverallLevelKey) || 0;
+
+  if (overall.level > prevLevel) {
+    // Simpan level overall baru
+    dbRaw.set(prevOverallLevelKey, overall.level);
+
+    const newOverallLevel = overall.level;
+
+    // Cek role reward overall
+    const rewardRoleId = getReward(guildId, 'overall', newOverallLevel);
+    if (rewardRoleId && member) {
+      try {
+        const role = guild.roles.cache.get(rewardRoleId);
+        if (role && !member.roles.cache.has(rewardRoleId)) {
+          await member.roles.add(role);
+        }
+      } catch (err) {
+        console.error(`Gagal kasih overall role reward: ${err.message}`);
+      }
+    }
+
+    // Notif hanya kalau milestone
+    if (isMilestoneLevel(newOverallLevel)) {
       const savedChannelId = getLevelChannel(guildId);
       const channel = (savedChannelId && guild.channels.cache.get(savedChannelId))
         || guild.systemChannel
@@ -213,40 +301,8 @@ async function processVoiceLeave(guild, userId, trackKey) {
             (c) => c.type === ChannelType.GuildText && c.permissionsFor(guild.members.me)?.has('SendMessages')
           );
       if (channel) {
-        try {
-          const { createLevelUpGIF } = require('./levelUpCard');
-          const gifBuffer = await createLevelUpGIF({
-            username: member.displayName,
-            avatarURL: member.user.displayAvatarURL({ extension: 'png', size: 256 }),
-            oldLevel: result.newLevel - 1,
-            newLevel: result.newLevel,
-            type: 'voice',
-          });
-          await channel.send({
-            content: `🎉 ${member} naik ke **🎙️ Voice Level ${result.newLevel}**!${voiceReason ? ` ⚡ **${voiceReason}**` : ''}`,
-            files: [{ attachment: gifBuffer, name: 'levelup-voice.gif' }],
-          });
-        } catch (err) {
-          console.error('Gagal generate voice level up GIF:', err.message);
-          channel.send(`🎙️ **${member.displayName}** naik ke **Voice Level ${result.newLevel}**! Mantap bos!`)
-            .catch(() => {});
-        }
-      }
-    }
-  } else if (result.leveledUp) {
-    // Level naik tapi bukan milestone — tetap kasih role reward kalau ada (tanpa notif)
-    const rewardRoleId = getReward(guildId, 'voice', result.newLevel);
-    if (rewardRoleId) {
-      const member = guild.members.cache.get(userId);
-      if (member) {
-        try {
-          const role = guild.roles.cache.get(rewardRoleId);
-          if (role && !member.roles.cache.has(rewardRoleId)) {
-            await member.roles.add(role);
-          }
-        } catch (err) {
-          console.error(`Gagal kasih voice role reward: ${err.message}`);
-        }
+        channel.send(`🌟 ${member} naik ke **Overall Level ${newOverallLevel}**! (Chat Lv.${chatData.level} + Voice Lv.${voiceData.level})`)
+          .catch(() => {});
       }
     }
   }

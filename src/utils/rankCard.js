@@ -34,10 +34,35 @@ const THEMES = {
     label: 'VOICE',
     icon: '\u{1F3A4}',
   },
+  overall: {
+    primary: '#9b59b6',
+    secondary: '#c39bd3',
+    glow: 'rgba(155, 89, 182, 0.4)',
+    label: 'OVERALL',
+    icon: '\u{1F31F}',
+  },
 };
 
 const CARD_WIDTH = 934;
 const CARD_HEIGHT = 282;
+
+/**
+ * Convert hex color (#rrggbb) ke "r, g, b" string untuk rgba()
+ */
+function hexToRgb(hex) {
+  const m = hex.replace('#', '').match(/.{2}/g);
+  if (!m) return '255, 255, 255';
+  return `${parseInt(m[0], 16)}, ${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}`;
+}
+
+/**
+ * Format angka jadi ringkas: 12.1K, 3.6K, 1.2M
+ */
+function formatCompact(num) {
+  if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+  if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
+  return String(num);
+}
 
 /**
  * Fetch image dari URL dan return Buffer
@@ -135,13 +160,16 @@ function drawStar(ctx, cx, cy, spikes, outerRadius, innerRadius) {
  * Generate rank card sebagai Buffer
  * @param {GuildMember} member
  * @param {Object} data - { xp, level, messages?, minutes?, streak?, streakMultiplier?, rank?, totalUsers? }
- * @param {string} type - 'chat' atau 'voice'
+ * @param {string} type - 'chat', 'voice', atau 'overall'
  * @param {number} xpNeeded
  * @returns {Buffer}
  */
 async function createRankCard(member, data, type, xpNeeded) {
   const theme = THEMES[type] || THEMES.chat;
   const isChat = type === 'chat';
+  const isOverall = type === 'overall';
+  const themeRgb = hexToRgb(theme.primary);
+  const barEndColor = isChat ? '#90e0ef' : isOverall ? '#d7bde2' : '#ff8fa3';
 
   const canvas = createCanvas(CARD_WIDTH, CARD_HEIGHT);
   const ctx = canvas.getContext('2d');
@@ -187,7 +215,7 @@ async function createRankCard(member, data, type, xpNeeded) {
 
   // Card border (glow)
   drawRoundedRect(ctx, cardX, cardY, cardW, cardH, 20);
-  ctx.strokeStyle = `rgba(${isChat ? '0, 180, 216' : '233, 69, 96'}, 0.3)`;
+  ctx.strokeStyle = `rgba(${themeRgb}, 0.3)`;
   ctx.lineWidth = 1.5;
   ctx.stroke();
 
@@ -275,7 +303,7 @@ async function createRankCard(member, data, type, xpNeeded) {
   // Type label badge
   ctx.save();
   drawRoundedRect(ctx, textX, 40, 100, 24, 12);
-  ctx.fillStyle = `rgba(${isChat ? '0, 180, 216' : '233, 69, 96'}, 0.15)`;
+  ctx.fillStyle = `rgba(${themeRgb}, 0.15)`;
   ctx.fill();
   ctx.strokeStyle = theme.primary;
   ctx.lineWidth = 1;
@@ -323,7 +351,9 @@ async function createRankCard(member, data, type, xpNeeded) {
   // Stats text (no emoji — font default tidak support emoji, pakai text label aja)
   const statsText = isChat
     ? `${(data.messages || 0).toLocaleString()} messages`
-    : `${(data.minutes || 0).toLocaleString()} min in voice`;
+    : isOverall
+      ? `${formatCompact(data.totalXp || 0)} total XP`
+      : `${(data.minutes || 0).toLocaleString()} min in voice`;
   ctx.font = '16px Arial, sans-serif';
   ctx.fillStyle = '#a0a0b0';
   ctx.fillText(statsText, textX, 115);
@@ -393,7 +423,7 @@ async function createRankCard(member, data, type, xpNeeded) {
     const barGradient = ctx.createLinearGradient(barX, 0, barX + filledWidth, 0);
     barGradient.addColorStop(0, theme.primary);
     barGradient.addColorStop(0.5, theme.secondary);
-    barGradient.addColorStop(1, isChat ? '#90e0ef' : '#ff8fa3');
+    barGradient.addColorStop(1, barEndColor);
     ctx.fillStyle = barGradient;
     ctx.fill();
     ctx.restore();
@@ -428,7 +458,7 @@ async function createRankCard(member, data, type, xpNeeded) {
   // Brand label
   ctx.save();
   ctx.font = 'bold 10px Arial, sans-serif';
-  ctx.fillStyle = `rgba(${isChat ? '0, 180, 216' : '233, 69, 96'}, 0.45)`;
+  ctx.fillStyle = `rgba(${themeRgb}, 0.45)`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText('MURPHY LVL', cardX + 18, cardY + cardH - 12);

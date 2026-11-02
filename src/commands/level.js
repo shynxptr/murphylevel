@@ -15,6 +15,8 @@ module.exports = {
 
     const chatData = db.getChatData(guildId, targetUser.id);
     const voiceData = db.getVoiceData(guildId, targetUser.id);
+    const overallData = db.getOverallData(guildId, targetUser.id);
+    const overallRank = db.getOverallRankPosition(guildId, targetUser.id);
     const chatStreak = db.getStreak(guildId, targetUser.id, 'chat');
     const voiceStreak = db.getStreak(guildId, targetUser.id, 'voice');
 
@@ -42,6 +44,11 @@ module.exports = {
           name: '🎙️ Voice Level',
           value: `**Level:** ${voiceData.level}\n**XP:** ${voiceData.xp} / ${voiceXpNeeded}\n**Voice Minutes:** ${voiceData.minutes}\n**Streak:** ${voiceStreakText}`,
           inline: true,
+        },
+        {
+          name: '🌟 Overall Level',
+          value: `**Level:** ${overallData.level}\n**XP:** ${overallData.xp} / ${overallData.xpNeeded}\n**Total XP:** ${overallData.totalXp}\n**Rank:** #${overallRank.rank || '-'}/${overallRank.total}`,
+          inline: false,
         }
       )
       .setTimestamp();

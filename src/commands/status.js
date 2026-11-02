@@ -83,6 +83,8 @@ module.exports = {
 
     const chatData = db.getChatData(guildId, targetUser.id);
     const voiceData = db.getVoiceData(guildId, targetUser.id);
+    const overallData = db.getOverallData(guildId, targetUser.id);
+    const overallRank = db.getOverallRankPosition(guildId, targetUser.id);
     const chatStreak = db.getStreak(guildId, targetUser.id, 'chat');
     const voiceStreak = db.getStreak(guildId, targetUser.id, 'voice');
     const chatRank = db.getRankPosition(guildId, targetUser.id, 'chat');
@@ -90,6 +92,7 @@ module.exports = {
 
     const chatXpNeeded = db.getXPNeeded(chatData.level);
     const voiceXpNeeded = db.getXPNeeded(voiceData.level);
+    const overallPct = Math.min(Math.floor((overallData.xp / overallData.xpNeeded) * 100), 100);
 
     const totalXp = chatData.totalXp + voiceData.totalXp;
     const chatPct = Math.min(Math.floor((chatData.xp / chatXpNeeded) * 100), 100);
@@ -105,7 +108,7 @@ module.exports = {
     const embed = new EmbedBuilder()
       .setTitle(targetUser.username)
       .setDescription(
-        `Rank #${chatRank.rank || '-'} • Total ${formatCompact(totalXp)} XP`
+        `🌟 Overall Rank #${overallRank.rank || '-'} • Total ${formatCompact(totalXp)} XP`
       )
       .setColor(0x0f3460)
       .setThumbnail(targetUser.displayAvatarURL({ size: 256 }));
@@ -140,6 +143,20 @@ module.exports = {
       inline: false,
     });
 
+    // === OVERALL XP SECTION ===
+    embed.addFields({
+      name: '🌟 Overall XP — Level ' + overallData.level,
+      value: [
+        `\`${progressBar(overallData.xp, overallData.xpNeeded)}\` **${overallPct}%**`,
+        `${formatCompact(overallData.xp)} / ${formatCompact(overallData.xpNeeded)} XP • Need ${formatCompact(overallData.xpNeeded - overallData.xp)} XP`,
+        '',
+        '▸ Total XP : ' + formatCompact(overallData.totalXp),
+        '▸ Rank : #' + (overallRank.rank || '-') + ' / ' + (overallRank.total || 0),
+        '▸ Chat Lv.' + chatData.level + ' + Voice Lv.' + voiceData.level,
+      ].join('\n'),
+      inline: false,
+    });
+
     // === RINGKASAN ===
     const chatContribution = totalXp > 0 ? Math.round((chatData.totalXp / totalXp) * 100) : 0;
     const voiceContribution = totalXp > 0 ? Math.round((voiceData.totalXp / totalXp) * 100) : 0;
@@ -152,12 +169,12 @@ module.exports = {
         `▸ Voice XP : ${formatCompact(voiceData.totalXp)} (${voiceContribution}%)`,
         '▸ Total Pesan : ' + chatData.messages.toLocaleString() + ' pesan',
         '▸ Waktu di Voice : ' + formatDuration(voiceData.minutes),
-        '▸ Rank Chat : #' + (chatRank.rank || '-') + ' | Rank Voice : #' + (voiceRank.rank || '-'),
+        '▸ Rank Chat : #' + (chatRank.rank || '-') + ' | Rank Voice : #' + (voiceRank.rank || '-') + ' | Rank Overall : #' + (overallRank.rank || '-'),
       ].join('\n'),
       inline: false,
     });
 
-    embed.setFooter({ text: `Level ${chatData.level} Chat • Level ${voiceData.level} Voice` });
+    embed.setFooter({ text: `Overall Lv.${overallData.level} • Chat Lv.${chatData.level} • Voice Lv.${voiceData.level}` });
     embed.setTimestamp();
 
     await interaction.editReply({ embeds: [embed] });

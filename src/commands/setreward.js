@@ -12,7 +12,8 @@ module.exports = {
         .setRequired(true)
         .addChoices(
           { name: 'Chat Level', value: 'chat' },
-          { name: 'Voice Level', value: 'voice' }
+          { name: 'Voice Level', value: 'voice' },
+          { name: 'Overall Level (gabungan chat+voice)', value: 'overall' }
         )
     )
     .addIntegerOption((option) =>
@@ -39,11 +40,12 @@ module.exports = {
 
     db.setReward(guildId, type, level, role.id);
 
-    const typeLabel = type === 'chat' ? '💬 Chat' : '🎙️ Voice';
+    const typeLabel = type === 'chat' ? '💬 Chat' : type === 'voice' ? '🎙️ Voice' : '🌟 Overall';
+    const color = type === 'chat' ? 0x00b4d8 : type === 'voice' ? 0xe94560 : 0x9b59b6;
 
     const embed = new EmbedBuilder()
       .setTitle('✅ Role Reward Diset!')
-      .setColor(type === 'chat' ? 0x00b4d8 : 0xe94560)
+      .setColor(color)
       .addFields(
         { name: 'Tipe', value: typeLabel, inline: true },
         { name: 'Level', value: `${level}`, inline: true },

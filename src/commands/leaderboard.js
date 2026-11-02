@@ -12,7 +12,8 @@ module.exports = {
         .setRequired(true)
         .addChoices(
           { name: 'Chat Level', value: 'chat' },
-          { name: 'Voice Level', value: 'voice' }
+          { name: 'Voice Level', value: 'voice' },
+          { name: 'Overall Level (gabungan)', value: 'overall' }
         )
     ),
 
@@ -21,18 +22,25 @@ module.exports = {
 
     const type = interaction.options.getString('type');
     const guildId = interaction.guild.id;
-    const leaderboard = db.getLeaderboard(guildId, type, 10);
+
+    let leaderboard;
+    if (type === 'overall') {
+      leaderboard = db.getOverallLeaderboard(guildId, 10);
+    } else {
+      leaderboard = db.getLeaderboard(guildId, type, 10);
+    }
 
     if (leaderboard.length === 0) {
       return interaction.editReply('Belum ada data leaderboard untuk server ini. Mulai chat/voice dulu!');
     }
 
-    const typeLabel = type === 'chat' ? '💬 Chat' : '🎙️ Voice';
+    const typeLabel = type === 'chat' ? '💬 Chat' : type === 'voice' ? '🎙️ Voice' : '🌟 Overall';
+    const color = type === 'chat' ? 0x00b4d8 : type === 'voice' ? 0xe94560 : 0x9b59b6;
     const medalEmojis = ['🥇', '🥈', '🥉'];
 
     const embed = new EmbedBuilder()
       .setTitle(`🏆 Leaderboard ${typeLabel} Level`)
-      .setColor(type === 'chat' ? 0x00b4d8 : 0xe94560)
+      .setColor(color)
       .setThumbnail(interaction.guild.iconURL())
       .setTimestamp();
 

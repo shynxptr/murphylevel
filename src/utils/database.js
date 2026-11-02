@@ -562,6 +562,108 @@ function getStreak(guildId, userId, type) {
   return { streak, lastDate, bonusMultiplier };
 }
 
+// ============= OVERALL LEVEL =============
+
+/**
+ * Hitung overall level dari total XP gabungan (chat + voice).
+ * Pakai formula yang sama (getXPNeeded), tapi XP pool = chat totalXp + voice totalXp.
+ * Return { level, xp (sisa di level saat ini), xpNeeded, totalXp }
+ */
+function computeOverallLevel(chatTotalXp, voiceTotalXp) {
+  const combinedXp = (chatTotalXp || 0) + (voiceTotalXp || 0);
+  let level = 0;
+  let remaining = combinedXp;
+  while (level < MAX_LEVEL) {
+    const need = getXPNeeded(level);
+    if (remaining < need) break;
+    remaining -= need;
+    level++;
+  }
+  if (level >= MAX_LEVEL) remaining = 0;
+  return {
+    level,
+    xp: remaining,
+    xpNeeded: getXPNeeded(level),
+    totalXp: combinedXp,
+  };
+}
+
+/**
+ * Ambil data overall level user (gabungan chat + voice)
+ */
+function getOverallData(guildId, userId) {
+  const chatData = getChatData(guildId, userId);
+  const voiceData = getVoiceData(guildId, userId);
+  const overall = computeOverallLevel(chatData.totalXp, voiceData.totalXp);
+  return overall;
+}
+
+/**
+ * Ambil rank position overall user di guild.
+ * Return { rank, total }
+ */
+function getOverallRankPosition(guildId, userId) {
+  const allData = db.all();
+  const chatPrefix = `chat_${guildId}_`;
+  const voicePrefix = `voice_${guildId}_`;
+
+  // Kumpulkan total XP per user dari chat dan voice
+  const userTotalXp = new Map();
+
+  for (const entry of allData) {
+    // Cari key yang berakhiran _totalXp
+    if (!entry.ID.endsWith('_totalXp')) continue;
+
+    if (entry.ID.startsWith(chatPrefix)) {
+      const userId = entry.ID.replace(chatPrefix, '').replace('_totalXp', '');
+      userTotalXp.set(userId, (userTotalXp.get(userId) || 0) + (entry.data || 0));
+    } else if (entry.ID.startsWith(voicePrefix)) {
+      const userId = entry.ID.replace(voicePrefix, '').replace('_totalXp', '');
+      userTotalXp.set(userId, (userTotalXp.get(userId) || 0) + (entry.data || 0));
+    }
+  }
+
+  const users = Array.from(userTotalXp.entries()).map(([id, xp]) => ({ userId: id, xp }));
+  users.sort((a, b) => b.xp - a.xp);
+
+  const rank = users.findIndex((u) => u.userId === userId) + 1;
+  return { rank: rank > 0 ? rank : null, total: users.length };
+}
+
+/**
+ * Ambil leaderboard overall untuk guild tertentu.
+ * Return array of { userId, xp (totalXp gabungan), level }
+ */
+function getOverallLeaderboard(guildId, limit = 10) {
+  const allData = db.all();
+  const chatPrefix = `chat_${guildId}_`;
+  const voicePrefix = `voice_${guildId}_`;
+
+  const userTotalXp = new Map();
+
+  for (const entry of allData) {
+    if (!entry.ID.endsWith('_totalXp')) continue;
+
+    if (entry.ID.startsWith(chatPrefix)) {
+      const userId = entry.ID.replace(chatPrefix, '').replace('_totalXp', '');
+      userTotalXp.set(userId, (userTotalXp.get(userId) || 0) + (entry.data || 0));
+    } else if (entry.ID.startsWith(voicePrefix)) {
+      const userId = entry.ID.replace(voicePrefix, '').replace('_totalXp', '');
+      userTotalXp.set(userId, (userTotalXp.get(userId) || 0) + (entry.data || 0));
+    }
+  }
+
+  const users = Array.from(userTotalXp.entries()).map(([id, xp]) => {
+    // Hitung level dari total XP
+    const chatTotalXp = db.get(`chat_${guildId}_${id}_totalXp`) || 0;
+    const voiceTotalXp = db.get(`voice_${guildId}_${id}_totalXp`) || 0;
+    const { level } = computeOverallLevel(chatTotalXp, voiceTotalXp);
+    return { userId: id, xp, level };
+  });
+
+  return users.sort((a, b) => b.xp - a.xp).slice(0, limit);
+}
+
 module.exports = {
   MAX_LEVEL,
   MILESTONE_LEVELS,
@@ -591,4 +693,8 @@ module.exports = {
   syncScheduledEvents,
   updateDailyStreak,
   getStreak,
+  computeOverallLevel,
+  getOverallData,
+  getOverallRankPosition,
+  getOverallLeaderboard,
 };

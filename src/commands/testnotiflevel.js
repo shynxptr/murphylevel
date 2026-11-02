@@ -13,7 +13,8 @@ module.exports = {
         .setRequired(true)
         .addChoices(
           { name: '💬 Chat', value: 'chat' },
-          { name: '🎙️ Voice', value: 'voice' }
+          { name: '🎙️ Voice', value: 'voice' },
+          { name: '🌟 Overall', value: 'overall' }
         )
     )
     .addIntegerOption((option) =>
@@ -47,6 +48,7 @@ module.exports = {
     const username = member.displayName;
     const avatarURL = targetUser.displayAvatarURL({ extension: 'png', size: 256 });
     const oldLevel = newLevel - 1;
+    const typeLabel = type === 'chat' ? '💬 Chat' : type === 'voice' ? '🎙️ Voice' : '🌟 Overall';
 
     try {
       // Generate GIF level up card
@@ -60,19 +62,19 @@ module.exports = {
 
       // Kirim ke channel yang sama
       await interaction.channel.send({
-        content: `🎉 ${targetUser} naik ke **${type === 'chat' ? '💬 Chat' : '🎙️ Voice'} Level ${newLevel}**!`,
+        content: `🎉 ${targetUser} naik ke **${typeLabel} Level ${newLevel}**!`,
         files: [{ attachment: gifBuffer, name: `levelup-${type}.gif` }],
       });
 
       await interaction.editReply(
-        `✅ Notif level up berhasil dikirim!\n> **User:** ${username}\n> **Type:** ${type === 'chat' ? '💬 Chat' : '🎙️ Voice'}\n> **Level:** ${oldLevel} → ${newLevel}`
+        `✅ Notif level up berhasil dikirim!\n> **User:** ${username}\n> **Type:** ${typeLabel}\n> **Level:** ${oldLevel} → ${newLevel}`
       );
     } catch (err) {
       console.error('Gagal generate test level up GIF:', err);
 
       // Fallback: text only
       await interaction.channel.send(
-        `🎉 ${targetUser} naik ke **${type === 'chat' ? '💬 Chat' : '🎙️ Voice'} Level ${newLevel}**! Selamat! (test)`
+        `🎉 ${targetUser} naik ke **${typeLabel} Level ${newLevel}**! Selamat! (test)`
       );
 
       await interaction.editReply(

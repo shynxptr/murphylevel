@@ -1,18 +1,18 @@
 # 📊 Murphy Level Bot
 
-Discord bot dengan sistem leveling **terpisah**: **Chat Level** dan **Voice Level**.
+Discord bot dengan sistem leveling **terpisah**: **Chat Level**, **Voice Level**, dan **Overall Level** (gabungan chat + voice).
 
 ## ✨ Fitur
 
-| Fitur | Chat Level | Voice Level |
-|-------|-----------|-------------|
-| XP System | ✅ Dapat XP tiap chat (25-40 XP, cooldown 60s) | ✅ Dapat XP tiap menit di voice (20 XP/menit) |
-| Rank Card | ✅ Gambar dengan progress bar | ✅ Gambar dengan progress bar |
-| Leaderboard | ✅ Top 10 | ✅ Top 10 |
-| Role Reward | ✅ Auto role saat level up | ✅ Auto role saat level up |
-| Daily Streak Bonus | ✅ Bonus XP harian, multiplier hingga 3x | ✅ Bonus XP harian, multiplier hingga 3x |
-| XP Event/Multiplier | ✅ Double/triple XP event | ✅ Double/triple XP event |
-| Level Up Animation | ✅ GIF animasi | ✅ GIF animasi |
+| Fitur | Chat Level | Voice Level | Overall Level |
+|-------|-----------|-------------|---------------|
+| XP System | ✅ Dapat XP tiap chat (25-40 XP, cooldown 60s) | ✅ Dapat XP tiap menit di voice (20 XP/menit) | ✅ Gabungan chat + voice XP |
+| Rank Card | ✅ Gambar dengan progress bar | ✅ Gambar dengan progress bar | ✅ Gambar dengan progress bar |
+| Leaderboard | ✅ Top 10 | ✅ Top 10 | ✅ Top 10 |
+| Role Reward | ✅ Auto role saat level up | ✅ Auto role saat level up | ✅ Auto role saat level up |
+| Daily Streak Bonus | ✅ Bonus XP harian, multiplier hingga 3x | ✅ Bonus XP harian, multiplier hingga 3x | — (mengikuti chat/voice) |
+| XP Event/Multiplier | ✅ Double/triple XP event | ✅ Double/triple XP event | ✅ Otomatis terkena multiplier |
+| Level Up Animation | ✅ GIF animasi | ✅ GIF animasi | ✅ GIF animasi |
 
 ## 🚀 Setup
 
@@ -92,7 +92,13 @@ npm start
 ```
 /rank                        → Lihat rank sendiri (chat + voice)
 /rank type: Chat Level       → Lihat chat rank card aja
+/rank type: Overall Level    → Lihat overall rank card (gabungan chat+voice)
 /rank user: @user type: Voice Level → Lihat voice rank user lain
+```
+
+### Set role reward overall
+```
+/setreward type: Overall Level level: 50 role: @Legend
 ```
 
 ## 📁 Struktur Project
@@ -194,6 +200,19 @@ User **tidak dapat XP** di voice channel jika:
 - Sendirian di channel (minimal ada 2 orang)
 
 Anti-AFK juga menangani kasus saat satu orang leave — sisa user yang jadi sendirian langsung diproses & dihentikan tracking-nya.
+
+### 🌟 Overall Level (Gabungan Chat + Voice)
+
+Overall Level adalah level gabungan yang dihitung dari **total XP chat + total XP voice**. Level ini tidak disimpan secara permanen — dihitung on-the-fly setiap kali user dapat XP baru.
+
+- **Formula:** sama dengan chat/voice (`XPNeeded(L) = floor(2.5 × (L+1)^1.25 + 25)`)
+- **XP pool:** `chatTotalXp + voiceTotalXp`
+- **Notif level up:** hanya dikirim saat milestone (5, 10, 20, 30, ...)
+- **Role reward:** bisa diset via `/setreward type: Overall Level`
+- **Leaderboard:** `/leaderboard type: Overall Level (gabungan)`
+- **Rank card:** `/rank type: Overall Level (gabungan)`
+
+Overall level memungkinkan user yang aktif di **kedua** channel (chat + voice) merasakan progress yang lebih cepat dibanding yang hanya aktif di satu jenis.
 
 ## 🔧 Requirements
 
