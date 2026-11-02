@@ -1,6 +1,6 @@
 # 📊 Murphy Level Bot
 
-Discord bot dengan sistem leveling **terpisah**: **Chat Level**, **Voice Level**, dan **Overall Level** (gabungan chat + voice).
+Discord bot dengan sistem leveling **terpisah** (**Chat Level**, **Voice Level**, **Overall Level**) dan **Staff Directory** untuk monitoring staff server secara real-time.
 
 ## ✨ Fitur
 
@@ -59,6 +59,7 @@ cp config.example.json config.json
 Di Discord Developer Portal → tab **Bot** → aktifkan:
 - ✅ **Message Content Intent**
 - ✅ **Server Members Intent**
+- ✅ **Presence Intent** (untuk indikator status staff directory)
 
 ### 5. Jalankan bot
 ```bash
@@ -79,6 +80,16 @@ npm start
 | `/setevent` | *(Admin)* Atur scheduled XP event (recurring weekly) |
 | `/setlevelchannel` | *(Admin)* Set channel untuk announce level up |
 | `/testnotiflevel` | *(Admin)* Test notifikasi level up |
+| `/staff add` | *(Admin)* Tambah staff ke divisi |
+| `/staff remove` | *(Admin)* Hapus staff dari directory |
+| `/staff list` | Tampilkan embed staff directory (real-time monitoring) |
+| `/staff info` | Lihat info staff (sendiri/user lain) |
+| `/staff refresh` | Refresh directory embed (force update status) |
+| `/staff clear` | *(Admin)* Hapus SEMUA data staff directory |
+| `/staff-division create` | *(Admin)* Buat divisi baru |
+| `/staff-division delete` | *(Admin)* Hapus divisi |
+| `/staff-division list` | Lihat semua divisi |
+| `/staff-division reorder` | *(Admin)* Atur ulang urutan divisi |
 
 ## 🎨 Contoh Penggunaan
 
@@ -101,6 +112,53 @@ npm start
 /setreward type: Overall Level level: 50 role: @Legend
 ```
 
+## 👥 Staff Directory
+
+Fitur monitoring staff server secara **real-time**. Staff directory menampilkan:
+- Jumlah staff aktif/total
+- Jumlah divisi aktif/total
+- Tree struktur per divisi dengan indikator status (🟢 online, 🟡 idle, 🔴 dnd, ⚫ offline)
+- Dropdown untuk filter per divisi
+- Button "My Staff Profile" untuk lihat info sendiri
+
+### Setup
+
+1. **Buat divisi** (flexible, urutan bisa diatur):
+```
+/staff-division create name: Owner
+/staff-division create name: Administrator
+/staff-division create name: Moderator
+/staff-division create name: Event Organizer
+```
+
+2. **Tambah staff**:
+```
+/staff add user: @murphy division: Owner
+/staff add user: @user division: Administrator title: Head Admin
+```
+
+3. **Tampilkan directory**:
+```
+/staff list
+```
+Embed akan otomatis ter-update setiap 2 menit dan setiap kali staff berubah status (online/offline).
+
+### Atur ulang urutan divisi
+```
+/staff-division reorder order: Owner, Administrator, Moderator, Event Organizer
+```
+
+### Indikator status
+| Emoji | Status | Arti |
+|-------|--------|------|
+| <:open:1559450037631721483> | online/idle/dnd | Staff sedang aktif |
+| <:off:1566868467376988350> | offline | Staff offline / invisible |
+
+### Auto-refresh
+- **Setiap 2 menit:** embed directory auto-update untuk refresh status indikator
+- **Real-time:** saat staff berubah status (online→offline atau sebaliknya), embed langsung di-update
+- **Manual:** gunakan `/staff refresh` untuk force update
+
 ## 📁 Struktur Project
 
 ```
@@ -120,13 +178,17 @@ murphy level/
     │   ├── setmultiplier.js # Set XP multiplier event (admin)
     │   ├── setevent.js      # Scheduled XP event (admin)
     │   ├── setlevelchannel.js # Set channel announce level up (admin)
-    │   └── testnotiflevel.js  # Test notifikasi level up (admin)
+    │   ├── testnotiflevel.js  # Test notifikasi level up (admin)
+    │   ├── staff.js           # Staff directory (add, remove, list, info, refresh)
+    │   └── staff-division.js  # Manage divisi staff (create, delete, list, reorder)
     └── utils/
         ├── jsonDb.js         # JSON database (pure JS, no native deps)
-        ├── database.js       # Database handler (chat & voice XP, streak)
+        ├── database.js       # Database handler (chat & voice XP, streak, overall)
         ├── xpHandler.js      # XP tracking logic
         ├── rankCard.js       # Canvas rank card generator
-        └── levelUpCard.js    # Level up GIF animation generator
+        ├── levelUpCard.js    # Level up GIF animation generator
+        ├── staffDb.js        # Staff directory database handler
+        └── staffComponents.js # Staff directory component handlers (dropdown, button)
 ```
 
 ## ⚙️ Konfigurasi XP

@@ -15,6 +15,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildPresences,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
   ],
@@ -68,6 +69,33 @@ client.once(Events.ClientReady, async (c) => {
     });
   }, 15 * 60 * 1000);
 
+  // Auto-refresh staff directory embed setiap 2 menit (update status indikator)
+  const staffDb = require('./utils/staffDb');
+  const { buildDirectoryEmbed } = require('./commands/staff');
+  setInterval(async () => {
+    for (const guild of c.guilds.cache.values()) {
+      const dirMsg = staffDb.getDirectoryMessage(guild.id);
+      if (!dirMsg) continue;
+
+      try {
+        const channel = guild.channels.cache.get(dirMsg.channelId);
+        if (!channel) {
+          staffDb.clearDirectoryMessage(guild.id);
+          continue;
+        }
+        const msg = await channel.messages.fetch(dirMsg.messageId).catch(() => null);
+        if (!msg) {
+          staffDb.clearDirectoryMessage(guild.id);
+          continue;
+        }
+        const { embed, components } = await buildDirectoryEmbed(guild);
+        await msg.edit({ embeds: [embed], components });
+      } catch (err) {
+        // Silent fail — jangan spam console
+      }
+    }
+  }, 2 * 60 * 1000);
+
   // Register slash commands
   try {
     const rest = new REST({ version: '10' }).setToken(config.token);
@@ -85,9 +113,48 @@ client.once(Events.ClientReady, async (c) => {
 });
 
 // ========================
-// EVENT: Interaction Create (slash commands)
+// EVENT: Interaction Create (slash commands, autocomplete, components)
 // ========================
+const { handleDirectorySelect, handleProfileButton } = require('./utils/staffComponents');
+
 client.on(Events.InteractionCreate, async (interaction) => {
+  // Autocomplete (untuk division option di /staff dan /staff-division)
+  if (interaction.isAutocomplete()) {
+    const command = client.commands.get(interaction.commandName);
+    if (command && command.autocomplete) {
+      try {
+        await command.autocomplete(interaction);
+      } catch (err) {
+        console.error(`❌ Error autocomplete ${interaction.commandName}:`, err);
+      }
+    }
+    return;
+  }
+
+  // Component interactions (dropdown, button)
+  if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === 'staff_directory_select') {
+      try {
+        await handleDirectorySelect(interaction);
+      } catch (err) {
+        console.error('❌ Error directory select:', err);
+      }
+      return;
+    }
+  }
+
+  if (interaction.isButton()) {
+    if (interaction.customId === 'staff_profile_btn') {
+      try {
+        await handleProfileButton(interaction);
+      } catch (err) {
+        console.error('❌ Error profile button:', err);
+      }
+      return;
+    }
+  }
+
+  // Slash commands
   if (!interaction.isChatInputCommand()) return;
 
   const command = client.commands.get(interaction.commandName);
@@ -242,6 +309,34 @@ client.on(Events.MessageCreate, async (message) => {
 // EVENT: Voice State Update (voice XP)
 // ========================
 client.on(Events.VoiceStateUpdate, handleVoiceStateUpdate);
+
+// ========================
+// EVENT: Presence Update (refresh staff directory saat staff online/offline)
+// ========================
+client.on(Events.PresenceUpdate, async (oldPresence, newPresence) => {
+  if (!newPresence?.guild) return;
+  const guildId = newPresence.guild.id;
+  const userId = newPresence.userId;
+
+  // Cek apakah user ini staff
+  const staff = staffDb.getStaff(guildId, userId);
+  if (!staff) return;
+
+  // Cek apakah ada directory embed aktif
+  const dirMsg = staffDb.getDirectoryMessage(guildId);
+  if (!dirMsg) return;
+
+  try {
+    const channel = newPresence.guild.channels.cache.get(dirMsg.channelId);
+    if (!channel) return;
+    const msg = await channel.messages.fetch(dirMsg.messageId).catch(() => null);
+    if (!msg) return;
+    const { embed, components } = await buildDirectoryEmbed(newPresence.guild);
+    await msg.edit({ embeds: [embed], components });
+  } catch (err) {
+    // Silent fail
+  }
+});
 
 // ========================
 // EVENT: Guild Create (join new server)
