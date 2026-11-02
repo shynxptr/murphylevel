@@ -97,15 +97,21 @@ async function handleProfileButton(interaction) {
   const member = interaction.member;
   const statusEmoji = getPresenceEmoji(member?.presence?.status);
 
+  // Format divisi dengan title masing-masing
+  const divLines = staff.divisions.map((div) => {
+    const title = staff.titles[div];
+    return `• ${div}${title ? ` — **${title}**` : ''}`;
+  });
+
   const embed = new EmbedBuilder()
     .setTitle(`👤 Staff Profile — ${interaction.user.username}`)
     .setColor(0x9b59b6)
     .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
     .addFields(
       { name: 'Status', value: `${statusEmoji} ${member?.presence?.status || 'offline'}`, inline: true },
-      { name: 'Divisi', value: staff.division, inline: true },
-      { name: 'Title', value: staff.title || '—', inline: true },
-      { name: 'Join Server', value: member?.joinedAt ? `<t:${Math.floor(member.joinedAt.getTime() / 1000)}:R>` : '—', inline: true }
+      { name: 'Jumlah Divisi', value: `${staff.divisions.length}`, inline: true },
+      { name: 'Join Server', value: member?.joinedAt ? `<t:${Math.floor(member.joinedAt.getTime() / 1000)}:R>` : '—', inline: true },
+      { name: 'Divisi', value: divLines.join('\n'), inline: false }
     )
     .setTimestamp();
 

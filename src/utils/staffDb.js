@@ -1,9 +1,10 @@
 // Staff Directory Database — disimpan di database.json (bareng leveling)
 // Struktur key:
-//   staff_divisions_{guildId}              → array nama divisi (urutan)
-//   staff_{guildId}_{userId}_division      → nama divisi staff
-//   staff_{guildId}_{userId}_title         → title/custom label (optional)
-//   staff_directory_msg_{guildId}          → ID pesan embed directory (untuk auto-update)
+//   staff_divisions_{guildId}                       → array nama divisi (urutan)
+//   staff_{guildId}_{userId}_divisions              → array nama divisi yang dipegang staff (merangkap)
+//   staff_{guildId}_{userId}_{division}_title       → title/custom label per divisi (optional)
+//   staff_directory_msg_{guildId}                   → ID pesan embed directory (untuk auto-update)
+//   staff_directory_channel_{guildId}               → ID channel directory
 
 const db = require('./jsonDb');
 
@@ -41,7 +42,7 @@ function createDivision(guildId, name) {
 }
 
 /**
- * Hapus divisi. Staff di divisi ini juga dihapus.
+ * Hapus divisi. Staff di divisi ini juga dihapus dari divisi tersebut.
  * Return { success, error?, removedStaff: number }
  */
 function deleteDivision(guildId, name) {
@@ -50,19 +51,31 @@ function deleteDivision(guildId, name) {
   if (idx === -1) {
     return { success: false, error: 'Divisi tidak ditemukan' };
   }
+  const exactName = typeof divisions[idx] === 'string' ? divisions[idx] : divisions[idx].name;
   divisions.splice(idx, 1);
   db.set(`staff_divisions_${guildId}`, divisions);
 
-  // Hapus semua staff di divisi ini
+  // Hapus divisi ini dari semua staff yang merangkap
   const allData = db.all();
   const prefix = `staff_${guildId}_`;
   let removedStaff = 0;
   for (const entry of allData) {
     if (!entry.ID.startsWith(prefix)) continue;
-    if (!entry.ID.endsWith('_division')) continue;
-    if (typeof entry.data === 'string' && entry.data.toLowerCase() === name.toLowerCase()) {
-      const userId = entry.ID.replace(prefix, '').replace('_division', '');
-      removeStaff(guildId, userId);
+    if (!entry.ID.endsWith('_divisions')) continue;
+    if (!Array.isArray(entry.data)) continue;
+
+    const userId = entry.ID.replace(prefix, '').replace('_divisions', '');
+    const divs = entry.data;
+    if (divs.some((d) => d.toLowerCase() === exactName.toLowerCase())) {
+      const newDivs = divs.filter((d) => d.toLowerCase() !== exactName.toLowerCase());
+      if (newDivs.length === 0) {
+        // Staff tidak punya divisi lagi → hapus semua data staff
+        removeStaff(guildId, userId);
+      } else {
+        db.set(`staff_${guildId}_${userId}_divisions`, newDivs);
+      }
+      // Hapus title untuk divisi ini
+      db.delete(`staff_${guildId}_${userId}_${exactName}_title`);
       removedStaff++;
     }
   }
@@ -83,54 +96,105 @@ function reorderDivisions(guildId, divisionNames) {
 // ============= STAFF =============
 
 /**
- * Tambah / update staff. Set divisi & optional title.
- * Return { success, error? }
+ * Tambah staff ke divisi (merangkap — bisa punya multiple divisi).
+ * Return { success, error?, alreadyInDivision? }
  */
 function addStaff(guildId, userId, division, title = null) {
   const divNames = getDivisionNames(guildId);
   if (!divNames.some((d) => d.toLowerCase() === division.toLowerCase())) {
-    return { success: false, error: 'Divisi tidak ditemukan. Buat dulu dengan /staff division create' };
+    return { success: false, error: 'Divisi tidak ditemukan. Buat dulu dengan /staff-division create' };
   }
 
   // Cari nama divisi yang exact (case-insensitive match tapi simpan original)
   const exactName = divNames.find((d) => d.toLowerCase() === division.toLowerCase());
 
-  db.set(`staff_${guildId}_${userId}_division`, exactName);
-  if (title) {
-    db.set(`staff_${guildId}_${userId}_title`, title);
-  } else {
-    db.delete(`staff_${guildId}_${userId}_title`);
+  // Ambil divisi yang sudah dipegang user
+  const currentDivs = db.get(`staff_${guildId}_${userId}_divisions`) || [];
+
+  // Cek apakah sudah ada di divisi ini
+  if (currentDivs.some((d) => d.toLowerCase() === exactName.toLowerCase())) {
+    return { success: true, alreadyInDivision: true };
   }
-  return { success: true };
+
+  // Tambahkan divisi baru ke array
+  currentDivs.push(exactName);
+  db.set(`staff_${guildId}_${userId}_divisions`, currentDivs);
+
+  // Set title per divisi (optional)
+  if (title) {
+    db.set(`staff_${guildId}_${userId}_${exactName}_title`, title);
+  } else {
+    db.delete(`staff_${guildId}_${userId}_${exactName}_title`);
+  }
+  return { success: true, alreadyInDivision: false };
 }
 
 /**
- * Hapus staff.
+ * Hapus staff dari satu divisi tertentu (bukan hapus total).
+ * Return { success, wasStaff, removedFromDivision, remainingDivisions }
+ */
+function removeStaffFromDivision(guildId, userId, divisionName) {
+  const currentDivs = db.get(`staff_${guildId}_${userId}_divisions`) || [];
+  if (currentDivs.length === 0) {
+    return { success: false, wasStaff: false };
+  }
+
+  const exactName = currentDivs.find((d) => d.toLowerCase() === divisionName.toLowerCase());
+  if (!exactName) {
+    return { success: false, wasStaff: true, notInDivision: true };
+  }
+
+  const newDivs = currentDivs.filter((d) => d.toLowerCase() !== divisionName.toLowerCase());
+  db.delete(`staff_${guildId}_${userId}_${exactName}_title`);
+
+  if (newDivs.length === 0) {
+    // Tidak ada divisi lagi → hapus semua data staff
+    removeStaff(guildId, userId);
+    return { success: true, wasStaff: true, removedFromDivision: exactName, remainingDivisions: [] };
+  }
+
+  db.set(`staff_${guildId}_${userId}_divisions`, newDivs);
+  return { success: true, wasStaff: true, removedFromDivision: exactName, remainingDivisions: newDivs };
+}
+
+/**
+ * Hapus staff sepenuhnya (semua divisi & title).
  * Return { success, wasStaff: boolean }
  */
 function removeStaff(guildId, userId) {
-  const division = db.get(`staff_${guildId}_${userId}_division`);
-  if (!division) {
+  const currentDivs = db.get(`staff_${guildId}_${userId}_divisions`);
+  if (!currentDivs || !Array.isArray(currentDivs) || currentDivs.length === 0) {
     return { success: false, wasStaff: false };
   }
-  db.delete(`staff_${guildId}_${userId}_division`);
-  db.delete(`staff_${guildId}_${userId}_title`);
+
+  // Hapus semua title per divisi
+  for (const div of currentDivs) {
+    db.delete(`staff_${guildId}_${userId}_${div}_title`);
+  }
+  db.delete(`staff_${guildId}_${userId}_divisions`);
   return { success: true, wasStaff: true };
 }
 
 /**
  * Ambil info staff.
- * Return { division, title } atau null kalau bukan staff.
+ * Return { divisions: string[], titles: { division: title } } atau null kalau bukan staff.
  */
 function getStaff(guildId, userId) {
-  const division = db.get(`staff_${guildId}_${userId}_division`);
-  if (!division) return null;
-  const title = db.get(`staff_${guildId}_${userId}_title`) || null;
-  return { division, title };
+  const currentDivs = db.get(`staff_${guildId}_${userId}_divisions`);
+  if (!currentDivs || !Array.isArray(currentDivs) || currentDivs.length === 0) return null;
+
+  const titles = {};
+  for (const div of currentDivs) {
+    const title = db.get(`staff_${guildId}_${userId}_${div}_title`);
+    if (title) titles[div] = title;
+  }
+
+  return { divisions: currentDivs, titles };
 }
 
 /**
  * Ambil semua staff di guild, dikelompokkan per divisi.
+ * Staff yang merangkap akan muncul di tiap divisi yang dia pegang.
  * Return array of { division, members: [{ userId, title }] }
  */
 function getAllStaff(guildId) {
@@ -143,19 +207,22 @@ function getAllStaff(guildId) {
 
   for (const entry of allData) {
     if (!entry.ID.startsWith(prefix)) continue;
-    if (!entry.ID.endsWith('_division')) continue;
+    if (!entry.ID.endsWith('_divisions')) continue;
+    if (!Array.isArray(entry.data)) continue;
 
-    const userId = entry.ID.replace(prefix, '').replace('_division', '');
-    const division = entry.data;
-    const title = db.get(`staff_${guildId}_${userId}_title`) || null;
+    const userId = entry.ID.replace(prefix, '').replace('_divisions', '');
+    const userDivs = entry.data;
 
-    // Cari divisi di result
-    const divIdx = result.findIndex((d) => d.division === division);
-    if (divIdx !== -1) {
-      result[divIdx].members.push({ userId, title });
-    } else {
-      // Divisi tidak terdaftar (mungkin sudah dihapus tapi staff belum dibersihkan)
-      result.push({ division, members: [{ userId, title }] });
+    for (const div of userDivs) {
+      const title = db.get(`staff_${guildId}_${userId}_${div}_title`) || null;
+
+      const divIdx = result.findIndex((d) => d.division === div);
+      if (divIdx !== -1) {
+        result[divIdx].members.push({ userId, title });
+      } else {
+        // Divisi tidak terdaftar (mungkin sudah dihapus tapi staff belum dibersihkan)
+        result.push({ division: div, members: [{ userId, title }] });
+      }
     }
   }
 
@@ -172,7 +239,7 @@ function getStaffByDivision(guildId, divisionName) {
 }
 
 /**
- * Hitung total staff di guild.
+ * Hitung total staff unik di guild (bukan total entri divisi).
  */
 function getStaffCount(guildId) {
   const allData = db.all();
@@ -180,8 +247,8 @@ function getStaffCount(guildId) {
   let count = 0;
   for (const entry of allData) {
     if (!entry.ID.startsWith(prefix)) continue;
-    if (!entry.ID.endsWith('_division')) continue;
-    count++;
+    if (!entry.ID.endsWith('_divisions')) continue;
+    if (Array.isArray(entry.data) && entry.data.length > 0) count++;
   }
   return count;
 }
@@ -223,6 +290,7 @@ module.exports = {
   reorderDivisions,
   addStaff,
   removeStaff,
+  removeStaffFromDivision,
   getStaff,
   getAllStaff,
   getStaffByDivision,

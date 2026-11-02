@@ -28,9 +28,16 @@ module.exports = {
     .addSubcommand((sub) =>
       sub
         .setName('remove')
-        .setDescription('Hapus staff dari directory')
+        .setDescription('Hapus staff dari divisi tertentu atau hapus total')
         .addUserOption((opt) =>
           opt.setName('user').setDescription('User yang mau dihapus').setRequired(true)
+        )
+        .addStringOption((opt) =>
+          opt
+            .setName('division')
+            .setDescription('Divisi yang mau dihapus dari staff (kosongkan untuk hapus total)')
+            .setRequired(false)
+            .setAutocomplete(true)
         )
     )
     // Subcommand: list
@@ -97,13 +104,22 @@ module.exports = {
         return interaction.reply({ content: `❌ ${result.error}`, ephemeral: true });
       }
 
+      if (result.alreadyInDivision) {
+        return interaction.reply({ content: `ℹ️ ${user} sudah terdaftar di divisi **${division}**.`, ephemeral: true });
+      }
+
+      // Ambil semua divisi user setelah add
+      const staffInfo = staffDb.getStaff(guildId, user.id);
+      const allDivs = staffInfo ? staffInfo.divisions.join(', ') : division;
+
       const embed = new EmbedBuilder()
         .setTitle('✅ Staff Ditambahkan')
         .setColor(0x2ecc71)
         .addFields(
           { name: 'User', value: `${user} (${user.tag})`, inline: true },
-          { name: 'Divisi', value: division, inline: true },
-          { name: 'Title', value: title || '—', inline: true }
+          { name: 'Divisi Baru', value: division, inline: true },
+          { name: 'Title', value: title || '—', inline: true },
+          { name: 'Semua Divisi', value: allDivs, inline: false }
         )
         .setThumbnail(user.displayAvatarURL({ size: 128 }))
         .setTimestamp();
@@ -119,6 +135,44 @@ module.exports = {
       }
 
       const user = interaction.options.getUser('user');
+      const division = interaction.options.getString('division');
+
+      // Kalau division disebut → hapus dari divisi itu saja
+      if (division) {
+        const result = staffDb.removeStaffFromDivision(guildId, user.id, division);
+
+        if (!result.wasStaff) {
+          return interaction.reply({ content: `❌ ${user} bukan staff.`, ephemeral: true });
+        }
+        if (result.notInDivision) {
+          return interaction.reply({ content: `❌ ${user} tidak terdaftar di divisi **${division}**.`, ephemeral: true });
+        }
+
+        if (result.remainingDivisions.length === 0) {
+          const embed = new EmbedBuilder()
+            .setTitle('🗑️ Staff Dihapus')
+            .setColor(0xe74c3c)
+            .setDescription(`${user} dihapus dari divisi **${result.removedFromDivision}**.\nUser tidak punya divisi lagi → dihapus total dari directory.`)
+            .setTimestamp();
+          await interaction.reply({ embeds: [embed], ephemeral: true });
+          return;
+        }
+
+        const embed = new EmbedBuilder()
+          .setTitle('🗑️ Dihapus dari Divisi')
+          .setColor(0xe74c3c)
+          .addFields(
+            { name: 'User', value: `${user}`, inline: true },
+            { name: 'Dihapus dari', value: result.removedFromDivision, inline: true },
+            { name: 'Sisa Divisi', value: result.remainingDivisions.join(', '), inline: false }
+          )
+          .setTimestamp();
+
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+        return;
+      }
+
+      // Kalau division tidak disebut → hapus total
       const result = staffDb.removeStaff(guildId, user.id);
 
       if (!result.wasStaff) {
@@ -126,9 +180,9 @@ module.exports = {
       }
 
       const embed = new EmbedBuilder()
-        .setTitle('🗑️ Staff Dihapus')
+        .setTitle('🗑️ Staff Dihapus Total')
         .setColor(0xe74c3c)
-        .setDescription(`${user} (${user.tag}) telah dihapus dari staff directory.`)
+        .setDescription(`${user} (${user.tag}) telah dihapus sepenuhnya dari staff directory (semua divisi).`)
         .setTimestamp();
 
       await interaction.reply({ embeds: [embed], ephemeral: true });
@@ -147,15 +201,21 @@ module.exports = {
       const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
       const statusEmoji = getPresenceEmoji(member?.presence?.status);
 
+      // Format divisi dengan title masing-masing
+      const divLines = staff.divisions.map((div) => {
+        const title = staff.titles[div];
+        return `• ${div}${title ? ` — **${title}**` : ''}`;
+      });
+
       const embed = new EmbedBuilder()
         .setTitle(`👤 Staff Profile — ${targetUser.username}`)
         .setColor(0x9b59b6)
         .setThumbnail(targetUser.displayAvatarURL({ size: 256 }))
         .addFields(
           { name: 'Status', value: `${statusEmoji} ${member?.presence?.status || 'offline'}`, inline: true },
-          { name: 'Divisi', value: staff.division, inline: true },
-          { name: 'Title', value: staff.title || '—', inline: true },
-          { name: 'Join Server', value: member?.joinedAt ? `<t:${Math.floor(member.joinedAt.getTime() / 1000)}:R>` : '—', inline: true }
+          { name: 'Jumlah Divisi', value: `${staff.divisions.length}`, inline: true },
+          { name: 'Join Server', value: member?.joinedAt ? `<t:${Math.floor(member.joinedAt.getTime() / 1000)}:R>` : '—', inline: true },
+          { name: 'Divisi', value: divLines.join('\n'), inline: false }
         )
         .setTimestamp();
 
@@ -176,7 +236,7 @@ module.exports = {
       for (const entry of allData) {
         if (entry.ID.startsWith(prefix) || entry.ID === `staff_divisions_${guildId}`) {
           require('../utils/jsonDb').delete(entry.ID);
-          if (entry.ID.endsWith('_division')) removed++;
+          if (entry.ID.endsWith('_divisions') && Array.isArray(entry.data)) removed++;
         }
       }
       staffDb.clearDirectoryMessage(guildId);

@@ -81,7 +81,7 @@ npm start
 | `/setlevelchannel` | *(Admin)* Set channel untuk announce level up |
 | `/testnotiflevel` | *(Admin)* Test notifikasi level up |
 | `/staff add` | *(Admin)* Tambah staff ke divisi |
-| `/staff remove` | *(Admin)* Hapus staff dari directory |
+| `/staff remove` | *(Admin)* Hapus staff dari divisi tertentu atau hapus total |
 | `/staff list` | Tampilkan embed staff directory (real-time monitoring) |
 | `/staff info` | Lihat info staff (sendiri/user lain) |
 | `/staff refresh` | Refresh directory embed (force update status) |
@@ -131,11 +131,13 @@ Fitur monitoring staff server secara **real-time**. Staff directory menampilkan:
 /staff-division create name: Event Organizer
 ```
 
-2. **Tambah staff**:
+2. **Tambah staff** (bisa merangkap multiple divisi):
 ```
 /staff add user: @murphy division: Owner
 /staff add user: @user division: Administrator title: Head Admin
+/staff add user: @user division: Moderator
 ```
+User yang sudah jadi staff di satu divisi bisa ditambah ke divisi lain tanpa menimpa.
 
 3. **Tampilkan directory**:
 ```
