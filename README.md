@@ -151,8 +151,8 @@ Embed akan otomatis ter-update setiap 2 menit dan setiap kali staff berubah stat
 ### Indikator status
 | Emoji | Status | Arti |
 |-------|--------|------|
-| <:open:1559450037631721483> | online/idle/dnd | Staff sedang aktif |
-| <:off:1566868467376988350> | offline | Staff offline / invisible |
+| <a:open:1559450037631721483> | online/idle/dnd | Staff sedang aktif |
+| <a:off:1566868467376988350> | offline | Staff offline / invisible |
 
 ### Auto-refresh
 - **Setiap 2 menit:** embed directory auto-update untuk refresh status indikator

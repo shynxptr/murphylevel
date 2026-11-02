@@ -230,8 +230,9 @@ module.exports = {
 // ============= HELPER: PRESENCE EMOJI =============
 
 // Custom emoji IDs untuk indikator status staff directory
-const EMOJI_ONLINE = '<:open:1559450037631721483>';
-const EMOJI_OFFLINE = '<:off:1566868467376988350>';
+// Format <a:name:id> untuk animated emoji, <:name:id> untuk non-animated
+const EMOJI_ONLINE = '<a:open:1559450037631721483>';
+const EMOJI_OFFLINE = '<a:off:1566868467376988350>';
 
 /**
  * Ambil emoji indikator status kehadiran.
