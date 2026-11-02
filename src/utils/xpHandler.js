@@ -6,10 +6,10 @@ const { createLevelUpGIF } = require('./levelUpCard');
 // Track user yang sedang di voice channel
 const voiceTracker = new Map(); // key: `${guildId}_${userId}` => joinTimestamp
 
-// Chat XP config — XP sangat kecil supaya leveling benar-benar terasa challenging.
-// Rata-rata 13 XP/pesan, cooldown 3 menit -> max ~260 XP/hari dari chat (20 pesan)
-const CHAT_XP_MIN = 8;
-const CHAT_XP_MAX = 18;
+// Chat XP config — XP sangat kecil supaya leveling benar-benar challenging.
+// Rata-rata 6 XP/pesan, cooldown 3 menit -> max ~120 XP/hari dari chat (20 pesan)
+const CHAT_XP_MIN = 3;
+const CHAT_XP_MAX = 8;
 const CHAT_COOLDOWN_MS = 3 * 60 * 1000; // 3 menit cooldown per user
 const chatCooldown = new Map(); // key: `${guildId}_${userId}` => lastMessageTimestamp
 
@@ -33,7 +33,7 @@ function handleMessageCreate(message) {
   if (lastMsgTime && now - lastMsgTime < CHAT_COOLDOWN_MS) return;
   chatCooldown.set(trackKey, now);
 
-  // Random XP antara 8-18 (avg 13)
+  // Random XP antara 3-8 (avg 6)
   const baseXP = Math.floor(Math.random() * (CHAT_XP_MAX - CHAT_XP_MIN + 1)) + CHAT_XP_MIN;
 
   // Event multiplier

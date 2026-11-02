@@ -20,6 +20,8 @@ const client = new Client({
   ],
 });
 
+const PREFIX = config.prefix || '!';
+
 // Load commands
 client.commands = new Collection();
 const commandsPath = path.join(__dirname, 'commands');
@@ -106,9 +108,135 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 // ========================
-// EVENT: Message Create (chat XP)
+// EVENT: Message Create (chat XP + prefix commands)
 // ========================
-client.on(Events.MessageCreate, handleMessageCreate);
+
+// Buat pseudo-interaction supaya command slash bisa dipakai via prefix.
+// Support: reply(), deferReply(), editReply(), options.getUser(), options.getString()
+function createPseudoInteraction(message, args) {
+  const command = client.commands.get(message.commandName);
+  if (!command) return null;
+
+  // Parse options dari args berdasarkan definisi slash command
+  const optionsData = {};
+  const rawData = command.data.options || [];
+
+  let argIndex = 0;
+  for (const opt of rawData) {
+    if (argIndex >= args.length) break;
+
+    if (opt.type === 6) {
+      // USER option — parse mention atau raw ID
+      const arg = args[argIndex];
+      const mentionMatch = arg.match(/^<@!?(\d+)>$/);
+      const userId = mentionMatch ? mentionMatch[1] : arg;
+      const user = message.client.users.cache.get(userId)
+        || message.mentions.users.first();
+      if (user) optionsData[opt.name] = user;
+      argIndex++;
+    } else if (opt.type === 3) {
+      // STRING option
+      optionsData[opt.name] = args[argIndex];
+      argIndex++;
+    } else if (opt.type === 4) {
+      // INTEGER option
+      optionsData[opt.name] = parseInt(args[argIndex], 10);
+      argIndex++;
+    } else if (opt.type === 5) {
+      // BOOLEAN option
+      optionsData[opt.name] = args[argIndex] === 'true' || args[argIndex] === '1';
+      argIndex++;
+    }
+  }
+
+  let deferred = false;
+  let replied = false;
+
+  return {
+    deferred: false,
+    options: {
+      getUser: (name) => optionsData[name] || message.author,
+      getString: (name) => optionsData[name] ?? null,
+      getInteger: (name) => optionsData[name] ?? null,
+      getBoolean: (name) => optionsData[name] ?? null,
+    },
+    user: message.author,
+    member: message.member,
+    guild: message.guild,
+    channel: message.channel,
+    client: message.client,
+    get deferred() { return deferred; },
+    async reply(payload) {
+      if (replied || deferred) return;
+      replied = true;
+      if (typeof payload === 'string') {
+        await message.reply(payload).catch(() => {});
+      } else {
+        const content = payload.content || undefined;
+        const embeds = payload.embeds || undefined;
+        const files = payload.files || undefined;
+        await message.reply({ content, embeds, files, allowedMentions: { repliedUser: false } }).catch(() => {});
+      }
+    },
+    async deferReply() {
+      if (replied || deferred) return;
+      deferred = true;
+      // Kirim placeholder yang nanti di-edit
+      await message.reply('⏳ Loading...').catch(() => {});
+    },
+    async editReply(payload) {
+      if (typeof payload === 'string') {
+        await message.editReply ? message.editReply(payload) : message.channel.send(payload).catch(() => {});
+      } else {
+        const content = payload.content || undefined;
+        const embeds = payload.embeds || undefined;
+        const files = payload.files || undefined;
+        // Edit pesan placeholder kalau ada, kalau tidak kirim baru
+        try {
+          const repliedMsg = await message.fetchReference();
+          await repliedMsg.edit({ content, embeds, files }).catch(() => {});
+        } catch {
+          await message.channel.send({ content, embeds, files }).catch(() => {});
+        }
+      }
+    },
+  };
+}
+
+client.on(Events.MessageCreate, async (message) => {
+  // Chat XP handler (selalu jalan)
+  handleMessageCreate(message);
+
+  // Prefix command handler
+  if (message.author.bot || !message.guild) return;
+
+  const content = message.content.trim();
+  if (!content.startsWith(PREFIX)) return;
+
+  const args = content.slice(PREFIX.length).trim().split(/\s+/);
+  const commandName = args.shift()?.toLowerCase();
+  if (!commandName) return;
+
+  const command = client.commands.get(commandName);
+  if (!command) return;
+
+  message.commandName = commandName;
+
+  const interaction = createPseudoInteraction(message, args);
+  if (!interaction) return;
+
+  try {
+    await command.execute(interaction);
+  } catch (err) {
+    console.error(`❌ Error di prefix command !${commandName}:`, err);
+    const errorMsg = '❌ Ada error saat menjalankan command ini.';
+    if (interaction.deferred) {
+      await interaction.editReply(errorMsg).catch(() => {});
+    } else {
+      await interaction.reply({ content: errorMsg }).catch(() => {});
+    }
+  }
+});
 
 // ========================
 // EVENT: Voice State Update (voice XP)

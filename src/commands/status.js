@@ -96,7 +96,7 @@ module.exports = {
     const voicePct = Math.min(Math.floor((voiceData.xp / voiceXpNeeded) * 100), 100);
 
     // Estimasi rate harian (asumsi 20 pesan + 3 jam voice per hari, XP sangat ketat)
-    const avgChatXp = 13;
+    const avgChatXp = 6;
     const dailyChatXp = 20 * avgChatXp;
     const dailyVoiceXp = 180 * 4;
     const chatDays = estimateNextLevel(chatData.level, chatXpNeeded - chatData.xp, dailyChatXp);
