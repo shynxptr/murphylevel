@@ -9,6 +9,8 @@ config.clientId = process.env.CLIENT_ID || config.clientId;
 
 const { handleMessageCreate, handleVoiceStateUpdate, initVoiceTracking } = require('./utils/xpHandler');
 const db = require('./utils/database');
+const staffDb = require('./utils/staffDb');
+const { buildDirectoryEmbed } = require('./commands/staff');
 
 const client = new Client({
   intents: [
@@ -70,8 +72,6 @@ client.once(Events.ClientReady, async (c) => {
   }, 15 * 60 * 1000);
 
   // Auto-refresh staff directory embed setiap 2 menit (update status indikator)
-  const staffDb = require('./utils/staffDb');
-  const { buildDirectoryEmbed } = require('./commands/staff');
   setInterval(async () => {
     for (const guild of c.guilds.cache.values()) {
       const dirMsg = staffDb.getDirectoryMessage(guild.id);
