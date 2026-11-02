@@ -1,0 +1,6 @@
+node_modules/
+json.sqlite
+database.json
+*.log
+.env
+config.json

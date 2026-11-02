@@ -1,0 +1,70 @@
+{
+  "card": {
+    "width": 700,
+    "height": 200,
+    "bgColor": "#f8f9ff"
+  },
+  "avatar": {
+    "enabled": true,
+    "x": 65,
+    "y": 100,
+    "size": 80,
+    "showRing": true,
+    "showPulse": true
+  },
+  "title": {
+    "enabled": true,
+    "text": "LEVEL UP",
+    "x": 350,
+    "y": 65,
+    "fontSize": 36,
+    "font": "Jacatra",
+    "color": "#1b45f4",
+    "outlineColor": "#ffffff"
+  },
+  "username": {
+    "enabled": true,
+    "x": 350,
+    "y": 93,
+    "fontSize": 16,
+    "color": "#0a0a1a"
+  },
+  "levelBox": {
+    "enabled": true,
+    "x": 270,
+    "y": 145,
+    "width": 160,
+    "height": 36,
+    "fontSize": 22,
+    "color": "#1b45f4"
+  },
+  "typeBadge": {
+    "enabled": true,
+    "x": 436,
+    "y": 149,
+    "width": 70,
+    "height": 18,
+    "fontSize": 9
+  },
+  "decor": {
+    "showCornerAccents": true,
+    "showGrid": true,
+    "showLabels": true,
+    "showBarcode": true,
+    "showParticles": true,
+    "showDivider": true,
+    "dividerX": 125
+  },
+  "theme": {
+    "chat": {
+      "blue": "#1b45f4",
+      "lightBlue": "#4b7bff",
+      "label": "CHAT XP"
+    },
+    "voice": {
+      "blue": "#e94560",
+      "lightBlue": "#ff6b8a",
+      "label": "VOICE XP"
+    }
+  }
+}
