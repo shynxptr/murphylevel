@@ -145,7 +145,7 @@ module.exports = {
 
     // === OVERALL XP SECTION ===
     const cappedHint = overallData.capped
-      ? ` *(dicap oleh ${overallData.cappedBy === 'chat' ? 'Chat' : 'Voice'} Level)*`
+      ? ` *(stuck: naikkan ${overallData.cappedBy === 'chat' ? 'Chat' : 'Voice'} Level ke ${overallData.level + 1})*`
       : '';
     embed.addFields({
       name: '🌟 Overall XP — Level ' + overallData.level + cappedHint,

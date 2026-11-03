@@ -46,7 +46,7 @@ module.exports = {
           inline: true,
         },
         {
-          name: '🌟 Overall Level' + (overallData.capped ? ` *(cap: ${overallData.cappedBy})*` : ''),
+          name: '🌟 Overall Level' + (overallData.capped ? ` *(stuck: naikkan ${overallData.cappedBy === 'chat' ? 'Chat' : 'Voice'} Level ke ${overallData.level + 1})*` : ''),
           value: `**Level:** ${overallData.level}\n**XP:** ${overallData.xp} / ${overallData.xpNeeded}\n**Total XP:** ${overallData.totalXp}\n**Rank:** #${overallRank.rank || '-'}/${overallRank.total}`,
           inline: false,
         }

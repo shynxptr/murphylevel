@@ -78,8 +78,11 @@ module.exports = {
       overallData.streakMultiplier = chatData.streakMultiplier;
 
       const cardBuffer = await createRankCard(member, overallData, 'overall', overallData.xpNeeded);
+      const cappedNote = overallData.capped
+        ? ` ⚠️ Stuck! Naikkan ${overallData.cappedBy === 'chat' ? 'Chat' : 'Voice'} Level ke ${overallData.level + 1} untuk unlock Overall Level ${overallData.level + 1}`
+        : '';
       await interaction.editReply({
-        content: `🌟 **Overall Rank ${targetUser.username}** (Chat Lv.${chatData.level} + Voice Lv.${voiceData.level})`,
+        content: `🌟 **Overall Rank ${targetUser.username}** (Chat Lv.${chatData.level} + Voice Lv.${voiceData.level})${cappedNote}`,
         files: [{ attachment: cardBuffer, name: 'overall-rank.png' }],
       });
       return;
