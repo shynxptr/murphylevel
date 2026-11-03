@@ -20,7 +20,7 @@ const VOICE_XP_PER_MINUTE = 4;
 /**
  * Handle message untuk chat XP
  */
-function handleMessageCreate(message) {
+async function handleMessageCreate(message) {
   if (message.author.bot || !message.guild) return;
 
   const guildId = message.guild.id;
@@ -50,7 +50,7 @@ function handleMessageCreate(message) {
   }
 
   // Cek overall level up (gabungan chat + voice)
-  checkOverallLevelUp(message.guild, message.member, message.author);
+  await checkOverallLevelUp(message.guild, message.member, message.author);
 }
 
 /**
@@ -209,7 +209,7 @@ async function processVoiceLeave(guild, userId, trackKey) {
   // Cek overall level up (gabungan chat + voice)
   const member = guild.members.cache.get(userId);
   if (member) {
-    checkOverallLevelUp(guild, member, member.user);
+    await checkOverallLevelUp(guild, member, member.user);
   }
 
   if (result.leveledUp && isMilestoneLevel(result.newLevel)) {
@@ -266,7 +266,7 @@ async function checkOverallLevelUp(guild, member, user) {
 
   const chatData = getChatData(guildId, userId);
   const voiceData = getVoiceData(guildId, userId);
-  const overall = computeOverallLevel(chatData.totalXp, voiceData.totalXp);
+  const overall = computeOverallLevel(chatData.totalXp, voiceData.totalXp, chatData.level, voiceData.level);
 
   // Cek overall level sebelumnya yang disimpan
   const prevOverallLevelKey = `overall_${guildId}_${userId}_level`;

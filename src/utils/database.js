@@ -565,26 +565,68 @@ function getStreak(guildId, userId, type) {
 // ============= OVERALL LEVEL =============
 
 /**
- * Hitung overall level dari total XP gabungan (chat + voice).
- * Pakai formula yang sama (getXPNeeded), tapi XP pool = chat totalXp + voice totalXp.
- * Return { level, xp (sisa di level saat ini), xpNeeded, totalXp }
+ * Hitung level dari total XP (tanpa capped).
+ * Dipakai untuk menentukan chatLevel & voiceLevel di computeOverallLevel.
  */
-function computeOverallLevel(chatTotalXp, voiceTotalXp) {
-  const combinedXp = (chatTotalXp || 0) + (voiceTotalXp || 0);
+function computeLevel(totalXp) {
   let level = 0;
-  let remaining = combinedXp;
+  let remaining = totalXp || 0;
   while (level < MAX_LEVEL) {
     const need = getXPNeeded(level);
     if (remaining < need) break;
     remaining -= need;
     level++;
   }
-  if (level >= MAX_LEVEL) remaining = 0;
+  return level;
+}
+
+/**
+ * Hitung overall level dari total XP gabungan (chat + voice).
+ * Pakai formula yang sama (getXPNeeded), tapi XP pool = chat totalXp + voice totalXp.
+ *
+ * LIMITASI: Overall level TIDAK boleh lebih tinggi dari level terendah
+ * antara chat & voice. Jadi overall level = min(computedLevel, chatLevel, voiceLevel).
+ * XP berlebih tetap disimpan sebagai progress ke level berikutnya.
+ *
+ * Return { level, xp (sisa di level saat ini), xpNeeded, totalXp, capped }
+ */
+function computeOverallLevel(chatTotalXp, voiceTotalXp, chatLevel, voiceLevel) {
+  const combinedXp = (chatTotalXp || 0) + (voiceTotalXp || 0);
+
+  // Hitung level dari combined XP (seperti sebelumnya)
+  let computedLevel = 0;
+  let remaining = combinedXp;
+  while (computedLevel < MAX_LEVEL) {
+    const need = getXPNeeded(computedLevel);
+    if (remaining < need) break;
+    remaining -= need;
+    computedLevel++;
+  }
+  if (computedLevel >= MAX_LEVEL) remaining = 0;
+
+  // Capped: overall level tidak boleh lebih tinggi dari level terendah
+  const chatLv = chatLevel || 0;
+  const voiceLv = voiceLevel || 0;
+  const minLevel = Math.min(chatLv, voiceLv);
+  const capped = computedLevel > minLevel;
+  const finalLevel = Math.min(computedLevel, minLevel);
+
+  // Hitung ulang XP remaining berdasarkan finalLevel
+  // (total XP - total XP yang dibutuhkan untuk mencapai finalLevel)
+  if (capped) {
+    remaining = combinedXp;
+    for (let i = 0; i < finalLevel; i++) {
+      remaining -= getXPNeeded(i);
+    }
+    if (remaining < 0) remaining = 0;
+  }
+
   return {
-    level,
+    level: finalLevel,
     xp: remaining,
-    xpNeeded: getXPNeeded(level),
+    xpNeeded: getXPNeeded(finalLevel),
     totalXp: combinedXp,
+    capped, // true kalau overall level di-cap oleh level terendah
   };
 }
 
@@ -594,7 +636,7 @@ function computeOverallLevel(chatTotalXp, voiceTotalXp) {
 function getOverallData(guildId, userId) {
   const chatData = getChatData(guildId, userId);
   const voiceData = getVoiceData(guildId, userId);
-  const overall = computeOverallLevel(chatData.totalXp, voiceData.totalXp);
+  const overall = computeOverallLevel(chatData.totalXp, voiceData.totalXp, chatData.level, voiceData.level);
   return overall;
 }
 
@@ -654,15 +696,44 @@ function getOverallLeaderboard(guildId, limit = 10) {
   }
 
   const users = Array.from(userTotalXp.entries()).map(([id, xp]) => {
-    // Hitung level dari total XP
+    // Hitung level dari total XP dengan limitasi min(chatLevel, voiceLevel)
     const chatTotalXp = db.get(`chat_${guildId}_${id}_totalXp`) || 0;
     const voiceTotalXp = db.get(`voice_${guildId}_${id}_totalXp`) || 0;
-    const { level } = computeOverallLevel(chatTotalXp, voiceTotalXp);
+    const chatLevel = computeLevel(chatTotalXp);
+    const voiceLevel = computeLevel(voiceTotalXp);
+    const { level } = computeOverallLevel(chatTotalXp, voiceTotalXp, chatLevel, voiceLevel);
     return { userId: id, xp, level };
   });
 
   return users.sort((a, b) => b.xp - a.xp).slice(0, limit);
 }
+
+// ============= AUTO-RESET OVERALL LEVEL CACHE =============
+
+/**
+ * Reset semua cached overall level (key: overall_{guildId}_{userId}_level).
+ * Dilakukan saat bot start supaya aturan capped baru (min chatLevel, voiceLevel)
+ * langsung berlaku untuk semua user yang sudah ada.
+ *
+ * Tanpa reset, user yang overall level-nya sudah disimpan dengan aturan lama
+ * (uncapped) tidak akan dikoreksi sampai mereka naik level lagi.
+ */
+function resetOverallLevelCache() {
+  const allData = db.all();
+  let reset = 0;
+  for (const entry of allData) {
+    if (entry.ID.startsWith('overall_') && entry.ID.endsWith('_level')) {
+      db.delete(entry.ID);
+      reset++;
+    }
+  }
+  if (reset > 0) {
+    console.log(`🔄 Overall level: reset ${reset} cached entries (applying new capped rule).`);
+  }
+}
+
+// Run reset on load
+resetOverallLevelCache();
 
 module.exports = {
   MAX_LEVEL,
@@ -694,6 +765,7 @@ module.exports = {
   updateDailyStreak,
   getStreak,
   computeOverallLevel,
+  computeLevel,
   getOverallData,
   getOverallRankPosition,
   getOverallLeaderboard,

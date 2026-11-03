@@ -272,7 +272,7 @@ function createPseudoInteraction(message, args) {
 
 client.on(Events.MessageCreate, async (message) => {
   // Chat XP handler (selalu jalan)
-  handleMessageCreate(message);
+  handleMessageCreate(message).catch((err) => console.error('❌ Error di handleMessageCreate:', err));
 
   // Prefix command handler
   if (message.author.bot || !message.guild) return;
