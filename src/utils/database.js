@@ -611,22 +611,30 @@ function computeOverallLevel(chatTotalXp, voiceTotalXp, chatLevel, voiceLevel) {
   const capped = computedLevel > minLevel;
   const finalLevel = Math.min(computedLevel, minLevel);
 
-  // Hitung ulang XP remaining berdasarkan finalLevel
+  // XP remaining berdasarkan finalLevel
   // (total XP - total XP yang dibutuhkan untuk mencapai finalLevel)
-  if (capped) {
-    remaining = combinedXp;
-    for (let i = 0; i < finalLevel; i++) {
-      remaining -= getXPNeeded(i);
-    }
-    if (remaining < 0) remaining = 0;
+  remaining = combinedXp;
+  for (let i = 0; i < finalLevel; i++) {
+    remaining -= getXPNeeded(i);
+  }
+  if (remaining < 0) remaining = 0;
+
+  const xpNeeded = getXPNeeded(finalLevel);
+
+  // Saat capped, XP berlebih bisa melebihi xpNeeded (user sudah siap naik,
+  // tapi dicegah oleh level terendah). Cap progress bar di 100% supaya
+  // tidak muncul angka negatif seperti "Need -99 XP".
+  if (capped && remaining > xpNeeded) {
+    remaining = xpNeeded;
   }
 
   return {
     level: finalLevel,
     xp: remaining,
-    xpNeeded: getXPNeeded(finalLevel),
+    xpNeeded,
     totalXp: combinedXp,
     capped, // true kalau overall level di-cap oleh level terendah
+    cappedBy: capped ? (chatLv < voiceLv ? 'chat' : 'voice') : null,
   };
 }
 

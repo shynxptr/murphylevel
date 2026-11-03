@@ -144,8 +144,11 @@ module.exports = {
     });
 
     // === OVERALL XP SECTION ===
+    const cappedHint = overallData.capped
+      ? ` *(dicap oleh ${overallData.cappedBy === 'chat' ? 'Chat' : 'Voice'} Level)*`
+      : '';
     embed.addFields({
-      name: '🌟 Overall XP — Level ' + overallData.level,
+      name: '🌟 Overall XP — Level ' + overallData.level + cappedHint,
       value: [
         `\`${progressBar(overallData.xp, overallData.xpNeeded)}\` **${overallPct}%**`,
         `${formatCompact(overallData.xp)} / ${formatCompact(overallData.xpNeeded)} XP • Need ${formatCompact(overallData.xpNeeded - overallData.xp)} XP`,
