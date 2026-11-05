@@ -15,45 +15,39 @@ const db = require('./jsonDb');
  * Dipanggil sekali saat module load. Aman kalau data sudah format baru (no-op).
  */
 function migrateOldFormat() {
-  const allData = db.all();
   const migrated = [];
 
-  for (const entry of allData) {
-    // Cari key dengan suffix _division (bukan _divisions, bukan _divisions_xxx_title)
-    if (!entry.ID.endsWith('_division')) continue;
-    if (entry.ID.endsWith('_divisions')) continue;
+  db.forEachPrefix('staff_', (key, value) => {
+    if (!key.endsWith('_division') || key.endsWith('_divisions')) return;
 
-    // Extract: staff_{guildId}_{userId}_division
-    const match = entry.ID.match(/^staff_(\d+)_(\d+)_division$/);
-    if (!match) continue;
+    const match = key.match(/^staff_(\d+)_(\d+)_division$/);
+    if (!match) return;
 
     const [, guildId, userId] = match;
-    const division = entry.data;
-    if (typeof division !== 'string') continue;
+    const division = value;
+    if (typeof division !== 'string') return;
 
-    // Cek apakah user sudah punya key _divisions (format baru)
     const existingDivs = db.get(`staff_${guildId}_${userId}_divisions`);
     if (existingDivs && Array.isArray(existingDivs)) {
-      // Sudah format baru, tapi cek apakah divisi lama belum ada di array
       if (!existingDivs.some((d) => d.toLowerCase() === division.toLowerCase())) {
         existingDivs.push(division);
         db.set(`staff_${guildId}_${userId}_divisions`, existingDivs);
       }
     } else {
-      // Belum ada format baru → buat array baru
       db.set(`staff_${guildId}_${userId}_divisions`, [division]);
     }
 
-    // Migrate title lama (staff_{guildId}_{userId}_title) ke format per-divisi
     const oldTitle = db.get(`staff_${guildId}_${userId}_title`);
     if (oldTitle) {
       db.set(`staff_${guildId}_${userId}_${division}_title`, oldTitle);
       db.delete(`staff_${guildId}_${userId}_title`);
     }
 
-    // Hapus key lama
-    db.delete(entry.ID);
-    migrated.push(entry.ID);
+    migrated.push(key);
+  });
+
+  for (const oldKey of migrated) {
+    db.delete(oldKey);
   }
 
   if (migrated.length > 0) {
@@ -112,31 +106,28 @@ function deleteDivision(guildId, name) {
   db.set(`staff_divisions_${guildId}`, divisions);
 
   // Hapus divisi ini dari semua staff yang merangkap
-  const allData = db.all();
   const prefix = `staff_${guildId}_`;
-  let removedStaff = 0;
-  for (const entry of allData) {
-    if (!entry.ID.startsWith(prefix)) continue;
-    if (!entry.ID.endsWith('_divisions')) continue;
-    if (!Array.isArray(entry.data)) continue;
+  const affectedUsers = [];
 
-    const userId = entry.ID.replace(prefix, '').replace('_divisions', '');
-    const divs = entry.data;
-    if (divs.some((d) => d.toLowerCase() === exactName.toLowerCase())) {
-      const newDivs = divs.filter((d) => d.toLowerCase() !== exactName.toLowerCase());
-      if (newDivs.length === 0) {
-        // Staff tidak punya divisi lagi → hapus semua data staff
-        removeStaff(guildId, userId);
-      } else {
-        db.set(`staff_${guildId}_${userId}_divisions`, newDivs);
-      }
-      // Hapus title untuk divisi ini
-      db.delete(`staff_${guildId}_${userId}_${exactName}_title`);
-      removedStaff++;
+  db.forEachPrefix(prefix, (key, value) => {
+    if (!key.endsWith('_divisions') || !Array.isArray(value)) return;
+    const userId = key.slice(prefix.length, -'_divisions'.length);
+    if (value.some((d) => d.toLowerCase() === exactName.toLowerCase())) {
+      affectedUsers.push({ userId, divs: value });
     }
+  });
+
+  for (const { userId, divs } of affectedUsers) {
+    const newDivs = divs.filter((d) => d.toLowerCase() !== exactName.toLowerCase());
+    if (newDivs.length === 0) {
+      removeStaff(guildId, userId);
+    } else {
+      db.set(`staff_${guildId}_${userId}_divisions`, newDivs);
+    }
+    db.delete(`staff_${guildId}_${userId}_${exactName}_title`);
   }
 
-  return { success: true, removedStaff };
+  return { success: true, removedStaff: affectedUsers.length };
 }
 
 /**
@@ -173,8 +164,8 @@ function addStaff(guildId, userId, division, title = null) {
   }
 
   // Tambahkan divisi baru ke array
-  currentDivs.push(exactName);
-  db.set(`staff_${guildId}_${userId}_divisions`, currentDivs);
+  const updatedDivs = [...currentDivs, exactName];
+  db.set(`staff_${guildId}_${userId}_divisions`, updatedDivs);
 
   // Set title per divisi (optional)
   if (title) {
@@ -254,33 +245,26 @@ function getStaff(guildId, userId) {
  * Return array of { division, members: [{ userId, title }] }
  */
 function getAllStaff(guildId) {
-  const allData = db.all();
   const prefix = `staff_${guildId}_`;
   const divNames = getDivisionNames(guildId);
 
   // Init struktur per divisi (urut sesuai divisi)
   const result = divNames.map((name) => ({ division: name, members: [] }));
 
-  for (const entry of allData) {
-    if (!entry.ID.startsWith(prefix)) continue;
-    if (!entry.ID.endsWith('_divisions')) continue;
-    if (!Array.isArray(entry.data)) continue;
+  db.forEachPrefix(prefix, (key, value) => {
+    if (!key.endsWith('_divisions') || !Array.isArray(value)) return;
 
-    const userId = entry.ID.replace(prefix, '').replace('_divisions', '');
-    const userDivs = entry.data;
-
-    for (const div of userDivs) {
+    const userId = key.slice(prefix.length, -'_divisions'.length);
+    for (const div of value) {
       const title = db.get(`staff_${guildId}_${userId}_${div}_title`) || null;
-
       const divIdx = result.findIndex((d) => d.division === div);
       if (divIdx !== -1) {
         result[divIdx].members.push({ userId, title });
       } else {
-        // Divisi tidak terdaftar (mungkin sudah dihapus tapi staff belum dibersihkan)
         result.push({ division: div, members: [{ userId, title }] });
       }
     }
-  }
+  });
 
   return result;
 }
@@ -298,14 +282,13 @@ function getStaffByDivision(guildId, divisionName) {
  * Hitung total staff unik di guild (bukan total entri divisi).
  */
 function getStaffCount(guildId) {
-  const allData = db.all();
   const prefix = `staff_${guildId}_`;
   let count = 0;
-  for (const entry of allData) {
-    if (!entry.ID.startsWith(prefix)) continue;
-    if (!entry.ID.endsWith('_divisions')) continue;
-    if (Array.isArray(entry.data) && entry.data.length > 0) count++;
-  }
+  db.forEachPrefix(prefix, (key, value) => {
+    if (key.endsWith('_divisions') && Array.isArray(value) && value.length > 0) {
+      count++;
+    }
+  });
   return count;
 }
 

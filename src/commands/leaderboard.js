@@ -23,12 +23,9 @@ module.exports = {
     const type = interaction.options.getString('type');
     const guildId = interaction.guild.id;
 
-    let leaderboard;
-    if (type === 'overall') {
-      leaderboard = db.getOverallLeaderboard(guildId, 10);
-    } else {
-      leaderboard = db.getLeaderboard(guildId, type, 10);
-    }
+    const leaderboard = type === 'overall'
+      ? db.getOverallLeaderboard(guildId, 10)
+      : db.getLeaderboard(guildId, type, 10);
 
     if (leaderboard.length === 0) {
       return interaction.editReply('Belum ada data leaderboard untuk server ini. Mulai chat/voice dulu!');
@@ -44,11 +41,18 @@ module.exports = {
       .setThumbnail(interaction.guild.iconURL())
       .setTimestamp();
 
-    let description = '';
+    // Fetch semua user secara paralel (cek cache terlebih dahulu)
+    const users = await Promise.all(
+      leaderboard.map((entry) =>
+        interaction.client.users.cache.get(entry.userId)
+        || interaction.client.users.fetch(entry.userId).catch(() => null)
+      )
+    );
 
+    let description = '';
     for (let i = 0; i < leaderboard.length; i++) {
       const entry = leaderboard[i];
-      const user = await interaction.client.users.fetch(entry.userId).catch(() => null);
+      const user = users[i];
       const username = user ? user.username : 'Unknown User';
       const medal = i < 3 ? medalEmojis[i] : `**${i + 1}.**`;
 

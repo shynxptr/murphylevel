@@ -17,6 +17,7 @@ module.exports = {
     const voiceData = db.getVoiceData(guildId, targetUser.id);
     const overallData = db.getOverallData(guildId, targetUser.id);
     const overallRank = db.getOverallRankPosition(guildId, targetUser.id);
+    const pointsData = db.getPointsData(guildId, targetUser.id);
     const chatStreak = db.getStreak(guildId, targetUser.id, 'chat');
     const voiceStreak = db.getStreak(guildId, targetUser.id, 'voice');
 
@@ -30,6 +31,10 @@ module.exports = {
       ? `${voiceStreak.streak} hari 🔥 (${voiceStreak.bonusMultiplier}x bonus)`
       : 'Belum ada 🔥';
 
+    const chatXpLine = `${chatData.xp} / ${chatXpNeeded}`;
+    const voiceXpLine = `${voiceData.xp} / ${voiceXpNeeded}`;
+    const overallXpLine = `${overallData.xp} / ${overallData.xpNeeded}`;
+
     const embed = new EmbedBuilder()
       .setTitle(`📊 Level ${targetUser.username}`)
       .setColor(0x0f3460)
@@ -37,17 +42,22 @@ module.exports = {
       .addFields(
         {
           name: '💬 Chat Level',
-          value: `**Level:** ${chatData.level}\n**XP:** ${chatData.xp} / ${chatXpNeeded}\n**Messages:** ${chatData.messages}\n**Streak:** ${chatStreakText}`,
+          value: `**Level:** ${chatData.level}\n**XP:** ${chatXpLine}\n**Messages:** ${chatData.messages}\n**Streak:** ${chatStreakText}`,
           inline: true,
         },
         {
           name: '🎙️ Voice Level',
-          value: `**Level:** ${voiceData.level}\n**XP:** ${voiceData.xp} / ${voiceXpNeeded}\n**Voice Minutes:** ${voiceData.minutes}\n**Streak:** ${voiceStreakText}`,
+          value: `**Level:** ${voiceData.level}\n**XP:** ${voiceXpLine}\n**Voice Minutes:** ${voiceData.minutes}\n**Streak:** ${voiceStreakText}`,
           inline: true,
         },
         {
-          name: '🌟 Overall Level' + (overallData.capped ? ` *(stuck: naikkan ${overallData.cappedBy === 'chat' ? 'Chat' : 'Voice'} Level ke ${overallData.level + 1})*` : ''),
-          value: `**Level:** ${overallData.level}\n**XP:** ${overallData.xp} / ${overallData.xpNeeded}\n**Total XP:** ${overallData.totalXp}\n**Rank:** #${overallRank.rank || '-'}/${overallRank.total}`,
+          name: '🌟 Overall Level',
+          value: `**Level:** ${overallData.level}\n**XP:** ${overallXpLine}\n**Total XP:** ${overallData.totalXp}\n**Rank:** #${overallRank.rank || '-'}/${overallRank.total}`,
+          inline: false,
+        },
+        {
+          name: '🪙 Level Points',
+          value: `**Dompet:** ${pointsData.balance} / ${pointsData.walletCap} Poin${pointsData.isWalletFull ? ' ⚠️ *(PENUH)*' : ''} *(Terpakai: ${pointsData.spentPoints} Poin)*\nTukarkan poin dengan Custom Role di \`/roleshop view\` atau \`!role\``,
           inline: false,
         }
       )

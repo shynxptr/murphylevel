@@ -57,7 +57,7 @@ function progressBar(current, needed, width = 20) {
 /**
  * Hitung estimasi kapan mencapai level berikutnya
  */
-function estimateNextLevel(currentLevel, xpNeeded, xpPerDay) {
+function estimateNextLevel(xpNeeded, xpPerDay) {
   if (xpPerDay <= 0) return 'tidak ada estimasi';
   const days = Math.ceil(xpNeeded / xpPerDay);
   if (days <= 0) return 'sekarang!';
@@ -84,26 +84,28 @@ module.exports = {
     const chatData = db.getChatData(guildId, targetUser.id);
     const voiceData = db.getVoiceData(guildId, targetUser.id);
     const overallData = db.getOverallData(guildId, targetUser.id);
-    const overallRank = db.getOverallRankPosition(guildId, targetUser.id);
+    const pointsData = db.getPointsData(guildId, targetUser.id);
+    const ranks = db.getAllRankPositions(guildId, targetUser.id);
+    const chatRank = ranks.chat;
+    const voiceRank = ranks.voice;
+    const overallRank = ranks.overall;
     const chatStreak = db.getStreak(guildId, targetUser.id, 'chat');
     const voiceStreak = db.getStreak(guildId, targetUser.id, 'voice');
-    const chatRank = db.getRankPosition(guildId, targetUser.id, 'chat');
-    const voiceRank = db.getRankPosition(guildId, targetUser.id, 'voice');
 
     const chatXpNeeded = db.getXPNeeded(chatData.level);
     const voiceXpNeeded = db.getXPNeeded(voiceData.level);
-    const overallPct = Math.min(Math.floor((overallData.xp / overallData.xpNeeded) * 100), 100);
 
     const totalXp = chatData.totalXp + voiceData.totalXp;
     const chatPct = Math.min(Math.floor((chatData.xp / chatXpNeeded) * 100), 100);
     const voicePct = Math.min(Math.floor((voiceData.xp / voiceXpNeeded) * 100), 100);
+    const overallPct = Math.min(Math.floor((overallData.xp / overallData.xpNeeded) * 100), 100);
 
-    // Estimasi rate harian (asumsi 20 pesan + 3 jam voice per hari, XP sangat ketat)
-    const avgChatXp = 6;
-    const dailyChatXp = 20 * avgChatXp;
-    const dailyVoiceXp = 180 * 4;
-    const chatDays = estimateNextLevel(chatData.level, chatXpNeeded - chatData.xp, dailyChatXp);
-    const voiceDays = estimateNextLevel(voiceData.level, voiceXpNeeded - voiceData.xp, dailyVoiceXp);
+    // Estimasi rate harian
+    const avgChatXp = 11;
+    const dailyChatXp = 25 * avgChatXp;
+    const dailyVoiceXp = 180 * 6;
+    const chatDays = estimateNextLevel(chatXpNeeded - chatData.xp, dailyChatXp);
+    const voiceDays = estimateNextLevel(voiceXpNeeded - voiceData.xp, dailyVoiceXp);
 
     const embed = new EmbedBuilder()
       .setTitle(targetUser.username)
@@ -144,11 +146,8 @@ module.exports = {
     });
 
     // === OVERALL XP SECTION ===
-    const cappedHint = overallData.capped
-      ? ` *(stuck: naikkan ${overallData.cappedBy === 'chat' ? 'Chat' : 'Voice'} Level ke ${overallData.level + 1})*`
-      : '';
     embed.addFields({
-      name: '🌟 Overall XP — Level ' + overallData.level + cappedHint,
+      name: '🌟 Overall XP — Level ' + overallData.level,
       value: [
         `\`${progressBar(overallData.xp, overallData.xpNeeded)}\` **${overallPct}%**`,
         `${formatCompact(overallData.xp)} / ${formatCompact(overallData.xpNeeded)} XP • Need ${formatCompact(overallData.xpNeeded - overallData.xp)} XP`,
@@ -172,6 +171,7 @@ module.exports = {
         `▸ Voice XP : ${formatCompact(voiceData.totalXp)} (${voiceContribution}%)`,
         '▸ Total Pesan : ' + chatData.messages.toLocaleString() + ' pesan',
         '▸ Waktu di Voice : ' + formatDuration(voiceData.minutes),
+        `▸ Level Points : **${pointsData.balance} / ${pointsData.walletCap} Poin**${pointsData.isWalletFull ? ' ⚠️ *(PENUH)*' : ''} (Terpakai ${pointsData.spentPoints} Poin)`,
         '▸ Rank Chat : #' + (chatRank.rank || '-') + ' | Rank Voice : #' + (voiceRank.rank || '-') + ' | Rank Overall : #' + (overallRank.rank || '-'),
       ].join('\n'),
       inline: false,

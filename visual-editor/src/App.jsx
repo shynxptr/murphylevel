@@ -177,6 +177,12 @@ function App() {
             >
               Voice
             </button>
+            <button
+              className={`theme-btn ${themeType === 'overall' ? 'active overall' : ''}`}
+              onClick={() => setThemeType('overall')}
+            >
+              Overall
+            </button>
           </div>
 
           {/* Canvas */}
@@ -238,7 +244,7 @@ function App() {
         </div>
         <div className="statusbar-right">
           <span className="statusbar-item">
-            Theme: {themeType === 'chat' ? 'Chat' : 'Voice'}
+            Theme: {themeType === 'chat' ? 'Chat' : themeType === 'voice' ? 'Voice' : 'Overall'}
           </span>
           {selected && (
             <span className="statusbar-item">

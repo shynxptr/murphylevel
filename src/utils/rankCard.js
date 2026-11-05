@@ -1,4 +1,4 @@
-const { createCanvas, GlobalFonts } = require('@napi-rs/canvas');
+const { createCanvas, GlobalFonts, loadImage } = require('@napi-rs/canvas');
 const path = require('path');
 
 // Register custom fonts
@@ -45,6 +45,7 @@ const THEMES = {
 
 const CARD_WIDTH = 934;
 const CARD_HEIGHT = 282;
+const MAX_LEVEL = 200;
 
 /**
  * Convert hex color (#rrggbb) ke "r, g, b" string untuk rgba()
@@ -159,15 +160,16 @@ function drawStar(ctx, cx, cy, spikes, outerRadius, innerRadius) {
 /**
  * Generate rank card sebagai Buffer
  * @param {GuildMember} member
- * @param {Object} data - { xp, level, messages?, minutes?, streak?, streakMultiplier?, rank?, totalUsers? }
+ * @param {Object} data - { xp, level, messages?, minutes?, streak?, streakMultiplier?, rank?, totalUsers?, capped?, cappedBy?, avatarBuffer? }
  * @param {string} type - 'chat', 'voice', atau 'overall'
  * @param {number} xpNeeded
- * @returns {Buffer}
+ * @returns {Promise<Buffer>}
  */
 async function createRankCard(member, data, type, xpNeeded) {
   const theme = THEMES[type] || THEMES.chat;
   const isChat = type === 'chat';
   const isOverall = type === 'overall';
+  const isMaxLevel = data.level >= MAX_LEVEL;
   const themeRgb = hexToRgb(theme.primary);
   const barEndColor = isChat ? '#90e0ef' : isOverall ? '#d7bde2' : '#ff8fa3';
 
@@ -263,11 +265,14 @@ async function createRankCard(member, data, type, xpNeeded) {
   ctx.arc(avatarCenterX, avatarCenterY, avatarSize / 2 + 5, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Avatar image
+  // Avatar image (gunakan loadImage dari @napi-rs/canvas)
   try {
-    const avatarURL = member.user.displayAvatarURL({ extension: 'png', size: 256 });
-    const avatarBuf = await fetchImageBuffer(avatarURL);
-    const avatar = await canvas.loadImage(avatarBuf);
+    let avatarBuf = data.avatarBuffer;
+    if (!avatarBuf) {
+      const avatarURL = member.user.displayAvatarURL({ extension: 'png', size: 256 });
+      avatarBuf = await fetchImageBuffer(avatarURL);
+    }
+    const avatar = await loadImage(avatarBuf);
 
     ctx.save();
     ctx.beginPath();
@@ -387,7 +392,9 @@ async function createRankCard(member, data, type, xpNeeded) {
   ctx.restore();
 
   // XP text
-  const xpText = `${data.xp.toLocaleString()} / ${xpNeeded.toLocaleString()} XP`;
+  const xpText = isMaxLevel
+    ? 'MAX LEVEL'
+    : `${data.xp.toLocaleString()} / ${xpNeeded.toLocaleString()} XP`;
   ctx.font = 'bold 16px Arial, sans-serif';
   ctx.fillStyle = '#a0a0b0';
   ctx.textAlign = 'right';
@@ -398,7 +405,7 @@ async function createRankCard(member, data, type, xpNeeded) {
   const barY = 160;
   const barWidth = CARD_WIDTH - barX - 55;
   const barHeight = 22;
-  const progress = Math.min(data.xp / xpNeeded, 1);
+  const progress = isMaxLevel ? 1 : Math.min(data.xp / xpNeeded, 1);
 
   // Bar background
   drawRoundedRect(ctx, barX, barY, barWidth, barHeight, barHeight / 2);
@@ -446,11 +453,23 @@ async function createRankCard(member, data, type, xpNeeded) {
   ctx.textAlign = 'center';
   ctx.fillText(percentText, barX + barWidth / 2, barY + barHeight + 18);
 
-  // XP remaining text
+  // XP remaining text / Capped status / Max level status
   const xpRemaining = Math.max(0, xpNeeded - data.xp);
-  const remainingText = `${xpRemaining.toLocaleString()} XP to next level`;
-  ctx.font = '11px Arial, sans-serif';
-  ctx.fillStyle = '#666680';
+  let remainingText;
+  let remainingColor = '#666680';
+  if (isMaxLevel) {
+    remainingText = 'MAX LEVEL REACHED';
+    remainingColor = theme.secondary;
+  } else if (data.capped) {
+    const capTarget = data.cappedBy === 'chat' ? 'Chat' : 'Voice';
+    remainingText = `CAPPED • Raise ${capTarget} to Lv.${data.level + 1}`;
+    remainingColor = '#ffb703';
+  } else {
+    remainingText = `${xpRemaining.toLocaleString()} XP to next level`;
+  }
+
+  ctx.font = 'bold 11px Arial, sans-serif';
+  ctx.fillStyle = remainingColor;
   ctx.textAlign = 'right';
   ctx.fillText(remainingText, CARD_WIDTH - 55, barY + barHeight + 18);
 
@@ -486,4 +505,4 @@ async function createRankCard(member, data, type, xpNeeded) {
   return canvas.toBuffer('image/png');
 }
 
-module.exports = { createRankCard };
+module.exports = { createRankCard, fetchImageBuffer };

@@ -7,10 +7,16 @@ const config = require('../config.json');
 config.token = process.env.BOT_TOKEN || config.token;
 config.clientId = process.env.CLIENT_ID || config.clientId;
 
-const { handleMessageCreate, handleVoiceStateUpdate, initVoiceTracking } = require('./utils/xpHandler');
+const {
+  handleMessageCreate,
+  handleVoiceStateUpdate,
+  initVoiceTracking,
+  flushActiveVoiceSessions,
+} = require('./utils/xpHandler');
 const db = require('./utils/database');
+const jsonDb = require('./utils/jsonDb');
 const staffDb = require('./utils/staffDb');
-const { buildDirectoryEmbed } = require('./commands/staff');
+const { buildDirectoryEmbed, getPresenceEmoji } = require('./commands/staff');
 
 const client = new Client({
   intents: [
@@ -41,6 +47,40 @@ for (const file of commandFiles) {
   }
 }
 
+// Helper: Refresh staff directory embed untuk 1 guild
+async function refreshGuildDirectoryEmbed(guild) {
+  const dirMsg = staffDb.getDirectoryMessage(guild.id);
+  if (!dirMsg) return;
+
+  try {
+    const channel = guild.channels.cache.get(dirMsg.channelId);
+    if (!channel) {
+      staffDb.clearDirectoryMessage(guild.id);
+      return;
+    }
+    const msg = await channel.messages.fetch(dirMsg.messageId).catch(() => null);
+    if (!msg) {
+      staffDb.clearDirectoryMessage(guild.id);
+      return;
+    }
+    const { embed, components } = await buildDirectoryEmbed(guild);
+    await msg.edit({ embeds: [embed], components });
+  } catch {
+    // Silent fail — jangan spam console
+  }
+}
+
+// Debounce map untuk PresenceUpdate per guild (mencegah rate limit Discord)
+const directoryUpdateTimers = new Map();
+function scheduleDirectoryRefresh(guild) {
+  if (directoryUpdateTimers.has(guild.id)) return;
+  const timer = setTimeout(async () => {
+    directoryUpdateTimers.delete(guild.id);
+    await refreshGuildDirectoryEmbed(guild);
+  }, 5000);
+  directoryUpdateTimers.set(guild.id, timer);
+}
+
 // ========================
 // EVENT: Ready
 // ========================
@@ -64,37 +104,30 @@ client.once(Events.ClientReady, async (c) => {
     }
   });
 
-  // Auto-sync setiap 15 menit (cek event mulai/berakhir)
+  // Auto-sync scheduled events setiap 15 menit (cek event mulai/berakhir)
   setInterval(() => {
     c.guilds.cache.forEach((guild) => {
       db.syncScheduledEvents(guild.id);
     });
   }, 15 * 60 * 1000);
 
+  // Checkpoint berkala voice XP setiap 5 menit (agar voice XP tersimpan walau user belum leave)
+  setInterval(() => {
+    flushActiveVoiceSessions(c).catch((err) => console.error('❌ Error flushing voice sessions:', err));
+  }, 5 * 60 * 1000);
+
   // Auto-refresh staff directory embed setiap 2 menit (update status indikator)
   setInterval(async () => {
     for (const guild of c.guilds.cache.values()) {
-      const dirMsg = staffDb.getDirectoryMessage(guild.id);
-      if (!dirMsg) continue;
-
-      try {
-        const channel = guild.channels.cache.get(dirMsg.channelId);
-        if (!channel) {
-          staffDb.clearDirectoryMessage(guild.id);
-          continue;
-        }
-        const msg = await channel.messages.fetch(dirMsg.messageId).catch(() => null);
-        if (!msg) {
-          staffDb.clearDirectoryMessage(guild.id);
-          continue;
-        }
-        const { embed, components } = await buildDirectoryEmbed(guild);
-        await msg.edit({ embeds: [embed], components });
-      } catch (err) {
-        // Silent fail — jangan spam console
-      }
+      await refreshGuildDirectoryEmbed(guild);
     }
   }, 2 * 60 * 1000);
+
+  // Cek & hapus otomatis Custom Role yang masa aktifnya sudah habis (expired) saat startup & tiap 1 menit
+  checkAndCleanupExpiredCustomRoles(c).catch((err) => console.error('❌ Error checking expired custom roles:', err));
+  setInterval(() => {
+    checkAndCleanupExpiredCustomRoles(c).catch((err) => console.error('❌ Error checking expired custom roles:', err));
+  }, 60 * 1000);
 
   // Register slash commands
   try {
@@ -116,8 +149,26 @@ client.once(Events.ClientReady, async (c) => {
 // EVENT: Interaction Create (slash commands, autocomplete, components)
 // ========================
 const { handleDirectorySelect, handleProfileButton } = require('./utils/staffComponents');
+const {
+  handleCustomRoleInteraction,
+  handleCustomRoleShortcut,
+  checkAndCleanupExpiredCustomRoles,
+} = require('./utils/customRoleComponents');
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  // Custom Role Panel Interactions (button, modal, user select menu dengan prefix "cr_")
+  if (
+    (interaction.isButton() || interaction.isModalSubmit() || interaction.isUserSelectMenu()) &&
+    interaction.customId?.startsWith('cr_')
+  ) {
+    try {
+      await handleCustomRoleInteraction(interaction);
+    } catch (err) {
+      console.error('❌ Error custom role interaction:', err);
+    }
+    return;
+  }
+
   // Autocomplete (untuk division option di /staff dan /staff-division)
   if (interaction.isAutocomplete()) {
     const command = client.commands.get(interaction.commandName);
@@ -179,50 +230,92 @@ client.on(Events.InteractionCreate, async (interaction) => {
 // ========================
 
 // Buat pseudo-interaction supaya command slash bisa dipakai via prefix.
-// Support: reply(), deferReply(), editReply(), options.getUser(), options.getString()
 function createPseudoInteraction(message, args) {
   const command = client.commands.get(message.commandName);
   if (!command) return null;
 
-  // Parse options dari args berdasarkan definisi slash command
   const optionsData = {};
-  const rawData = command.data.options || [];
-
+  let subcommandName = null;
+  let rawOptions = command.data.options || [];
   let argIndex = 0;
-  for (const opt of rawData) {
+
+  // Cek apakah command menggunakan subcommand (type === 1 atau SubcommandBuilder)
+  const firstOptJson = rawOptions[0]?.toJSON ? rawOptions[0].toJSON() : rawOptions[0];
+  if (firstOptJson && firstOptJson.type === 1) {
+    const candidateSub = args[0]?.toLowerCase();
+    const matchedSub = rawOptions
+      .map((o) => (o.toJSON ? o.toJSON() : o))
+      .find((o) => o.type === 1 && o.name === candidateSub);
+
+    if (matchedSub) {
+      subcommandName = matchedSub.name;
+      rawOptions = matchedSub.options || [];
+      argIndex = 1;
+    } else {
+      subcommandName = firstOptJson.name;
+      rawOptions = firstOptJson.options || [];
+    }
+  }
+
+  for (const rawOpt of rawOptions) {
     if (argIndex >= args.length) break;
+    const opt = rawOpt.toJSON ? rawOpt.toJSON() : rawOpt;
+    const arg = args[argIndex];
 
     if (opt.type === 6) {
-      // USER option — parse mention atau raw ID
-      const arg = args[argIndex];
+      // USER option — hanya konsumsi argumen jika benar-benar mention atau user ID
       const mentionMatch = arg.match(/^<@!?(\d+)>$/);
-      const userId = mentionMatch ? mentionMatch[1] : arg;
-      const user = message.client.users.cache.get(userId)
-        || message.mentions.users.first();
-      if (user) optionsData[opt.name] = user;
-      argIndex++;
+      const idMatch = arg.match(/^(\d{17,20})$/);
+      const userId = mentionMatch ? mentionMatch[1] : idMatch ? idMatch[1] : null;
+      if (userId) {
+        const user = message.client.users.cache.get(userId) || message.mentions.users.first();
+        if (user) optionsData[opt.name] = user;
+        argIndex++;
+      }
+    } else if (opt.type === 8) {
+      // ROLE option
+      const roleMatch = arg.match(/^<@&(\d+)>$/) || arg.match(/^(\d{17,20})$/);
+      if (roleMatch) {
+        const role = message.guild.roles.cache.get(roleMatch[1]);
+        if (role) optionsData[opt.name] = role;
+        argIndex++;
+      }
+    } else if (opt.type === 7) {
+      // CHANNEL option
+      const chanMatch = arg.match(/^<#(\d+)>$/) || arg.match(/^(\d{17,20})$/);
+      if (chanMatch) {
+        const channel = message.guild.channels.cache.get(chanMatch[1]);
+        if (channel) optionsData[opt.name] = channel;
+        argIndex++;
+      }
     } else if (opt.type === 3) {
       // STRING option
-      optionsData[opt.name] = args[argIndex];
+      optionsData[opt.name] = arg;
       argIndex++;
     } else if (opt.type === 4) {
       // INTEGER option
-      optionsData[opt.name] = parseInt(args[argIndex], 10);
-      argIndex++;
+      const parsed = parseInt(arg, 10);
+      if (!Number.isNaN(parsed)) {
+        optionsData[opt.name] = parsed;
+        argIndex++;
+      }
     } else if (opt.type === 5) {
       // BOOLEAN option
-      optionsData[opt.name] = args[argIndex] === 'true' || args[argIndex] === '1';
+      optionsData[opt.name] = arg === 'true' || arg === '1';
       argIndex++;
     }
   }
 
   let deferred = false;
   let replied = false;
+  let sentReply = null;
 
   return {
-    deferred: false,
     options: {
-      getUser: (name) => optionsData[name] || message.author,
+      getSubcommand: () => subcommandName,
+      getUser: (name) => optionsData[name] ?? null,
+      getRole: (name) => optionsData[name] ?? null,
+      getChannel: (name) => optionsData[name] ?? null,
       getString: (name) => optionsData[name] ?? null,
       getInteger: (name) => optionsData[name] ?? null,
       getBoolean: (name) => optionsData[name] ?? null,
@@ -232,40 +325,46 @@ function createPseudoInteraction(message, args) {
     guild: message.guild,
     channel: message.channel,
     client: message.client,
-    get deferred() { return deferred; },
+    get deferred() {
+      return deferred;
+    },
     async reply(payload) {
-      if (replied || deferred) return;
+      if (replied || deferred) return sentReply;
       replied = true;
       if (typeof payload === 'string') {
-        await message.reply(payload).catch(() => {});
+        sentReply = await message.reply(payload).catch(() => null);
       } else {
-        const content = payload.content || undefined;
-        const embeds = payload.embeds || undefined;
-        const files = payload.files || undefined;
-        await message.reply({ content, embeds, files, allowedMentions: { repliedUser: false } }).catch(() => {});
+        const { content, embeds, files, components } = payload;
+        sentReply = await message
+          .reply({ content, embeds, files, components, allowedMentions: { repliedUser: false } })
+          .catch(() => null);
       }
+      return sentReply;
     },
     async deferReply() {
-      if (replied || deferred) return;
+      if (replied || deferred) return sentReply;
       deferred = true;
-      // Kirim placeholder yang nanti di-edit
-      await message.reply('⏳ Loading...').catch(() => {});
+      sentReply = await message
+        .reply({ content: '⏳ Loading...', allowedMentions: { repliedUser: false } })
+        .catch(() => null);
+      return sentReply;
     },
     async editReply(payload) {
-      if (typeof payload === 'string') {
-        await message.editReply ? message.editReply(payload) : message.channel.send(payload).catch(() => {});
-      } else {
-        const content = payload.content || undefined;
-        const embeds = payload.embeds || undefined;
-        const files = payload.files || undefined;
-        // Edit pesan placeholder kalau ada, kalau tidak kirim baru
-        try {
-          const repliedMsg = await message.fetchReference();
-          await repliedMsg.edit({ content, embeds, files }).catch(() => {});
-        } catch {
-          await message.channel.send({ content, embeds, files }).catch(() => {});
-        }
+      const normalized = typeof payload === 'string'
+        ? { content: payload }
+        : {
+            content: payload.content ?? null,
+            embeds: payload.embeds,
+            files: payload.files,
+            components: payload.components,
+          };
+
+      if (sentReply) {
+        const edited = await sentReply.edit(normalized).catch(() => null);
+        if (edited) return edited;
       }
+      sentReply = await message.channel.send(normalized).catch(() => null);
+      return sentReply;
     },
   };
 }
@@ -283,6 +382,16 @@ client.on(Events.MessageCreate, async (message) => {
   const args = content.slice(PREFIX.length).trim().split(/\s+/);
   const commandName = args.shift()?.toLowerCase();
   if (!commandName) return;
+
+  // Shortcut Custom Role (!role, !color, !icon, !share, !unshare, !name, !extend, !shophelp, !rolehelp)
+  if (['role', 'customrole', 'myrole', 'color', 'icon', 'share', 'unshare', 'name', 'extend', 'shophelp', 'rolehelp'].includes(commandName)) {
+    try {
+      await handleCustomRoleShortcut(message, commandName, args);
+    } catch (err) {
+      console.error(`❌ Error di shortcut !${commandName}:`, err);
+    }
+    return;
+  }
 
   const command = client.commands.get(commandName);
   if (!command) return;
@@ -315,27 +424,21 @@ client.on(Events.VoiceStateUpdate, handleVoiceStateUpdate);
 // ========================
 client.on(Events.PresenceUpdate, async (oldPresence, newPresence) => {
   if (!newPresence?.guild) return;
+
+  // Abaikan perubahan aktivitas (Spotify/game/custom status) jika indikator online/offline tidak berubah
+  const oldEmoji = getPresenceEmoji(oldPresence?.status);
+  const newEmoji = getPresenceEmoji(newPresence?.status);
+  if (oldEmoji === newEmoji) return;
+
   const guildId = newPresence.guild.id;
   const userId = newPresence.userId;
 
-  // Cek apakah user ini staff
-  const staff = staffDb.getStaff(guildId, userId);
-  if (!staff) return;
+  // Cek apakah user ini staff & ada directory embed aktif
+  if (!staffDb.getDirectoryMessage(guildId)) return;
+  if (!staffDb.getStaff(guildId, userId)) return;
 
-  // Cek apakah ada directory embed aktif
-  const dirMsg = staffDb.getDirectoryMessage(guildId);
-  if (!dirMsg) return;
-
-  try {
-    const channel = newPresence.guild.channels.cache.get(dirMsg.channelId);
-    if (!channel) return;
-    const msg = await channel.messages.fetch(dirMsg.messageId).catch(() => null);
-    if (!msg) return;
-    const { embed, components } = await buildDirectoryEmbed(newPresence.guild);
-    await msg.edit({ embeds: [embed], components });
-  } catch (err) {
-    // Silent fail
-  }
+  // Debounce refresh agar tidak terkena rate limit Discord
+  scheduleDirectoryRefresh(newPresence.guild);
 });
 
 // ========================
@@ -344,6 +447,17 @@ client.on(Events.PresenceUpdate, async (oldPresence, newPresence) => {
 client.on(Events.GuildCreate, (guild) => {
   console.log(`\n📥 Bot ditambahkan ke server: ${guild.name} (${guild.memberCount} members)`);
 });
+
+// Graceful shutdown: flush voice sessions & save DB
+async function handleShutdown() {
+  try {
+    await flushActiveVoiceSessions(client, true);
+  } catch {}
+  jsonDb.saveSync();
+  process.exit(0);
+}
+process.on('SIGINT', handleShutdown);
+process.on('SIGTERM', handleShutdown);
 
 // ========================
 // Login

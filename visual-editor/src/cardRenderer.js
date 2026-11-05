@@ -176,14 +176,29 @@ function drawGraffitiText(ctx, text, x, y, color, outlineColor, fontSize, fontNa
  * Render the level-up card on a canvas context.
  * @param {CanvasRenderingContext2D} ctx
  * @param {object} layout - The layout configuration
- * @param {string} themeType - 'chat' or 'voice'
+ * @param {string} themeType - 'chat', 'voice', or 'overall'
  * @param {object} [options] - optional overrides
  */
 export function renderCard(ctx, layout, themeType = 'chat', options = {}) {
   const W = layout.card.width;
   const H = layout.card.height;
 
-  const theme = layout.theme[themeType] || layout.theme.chat;
+  const fallbackThemes = {
+    chat: { blue: '#1b45f4', lightBlue: '#4b7bff', label: 'CHAT XP' },
+    voice: { blue: '#e94560', lightBlue: '#ff6b8a', label: 'VOICE XP' },
+    overall: { blue: '#9b59b6', lightBlue: '#c39bd3', label: 'OVERALL XP' },
+  };
+  const theme = layout.theme?.[themeType] || fallbackThemes[themeType] || layout.theme?.chat || fallbackThemes.chat;
+  const defaultChatBlue = (layout.theme?.chat?.blue || '#1b45f4').toLowerCase();
+
+  const titleColor = (themeType === 'chat' && layout.title?.color)
+    || (layout.title?.color && layout.title.color.toLowerCase() !== defaultChatBlue ? layout.title.color : theme.blue);
+  const levelBoxColor = (themeType === 'chat' && layout.levelBox?.color)
+    || (layout.levelBox?.color && layout.levelBox.color.toLowerCase() !== defaultChatBlue ? layout.levelBox.color : theme.blue);
+  const usernameColor = (layout.username?.color && layout.username.color.toLowerCase() !== '#0a0a1a')
+    ? layout.username.color
+    : theme.blue;
+
   const gridColor = '#d6dcff';
 
   // ── Background ──
@@ -280,7 +295,7 @@ export function renderCard(ctx, layout, themeType = 'chat', options = {}) {
   // ── Title ──
   if (layout.title.enabled) {
     const t = layout.title;
-    drawGraffitiText(ctx, t.text, t.x, t.y, t.color, t.outlineColor, t.fontSize, t.font);
+    drawGraffitiText(ctx, t.text, t.x, t.y, titleColor, t.outlineColor, t.fontSize, t.font);
   }
 
   // ── Username ──
@@ -288,7 +303,7 @@ export function renderCard(ctx, layout, themeType = 'chat', options = {}) {
     const u = layout.username;
     const name = options.username || 'MurphyUser';
     ctx.font = `bold ${u.fontSize}px Arial, sans-serif`;
-    ctx.fillStyle = u.color;
+    ctx.fillStyle = usernameColor;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(name, u.x, u.y);
@@ -308,7 +323,7 @@ export function renderCard(ctx, layout, themeType = 'chat', options = {}) {
     const cx = lb.x + lb.width / 2;
     const cy = lb.y + lb.height / 2;
     ctx.font = `bold ${lb.fontSize + 2}px Arial, sans-serif`;
-    ctx.fillStyle = lb.color;
+    ctx.fillStyle = levelBoxColor;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(`LEVEL ${options.level || 5}`, cx, cy);

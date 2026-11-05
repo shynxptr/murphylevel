@@ -1,21 +1,85 @@
 const { ChannelType } = require('discord.js');
 const db = require('./database');
-const { addChatXP, addVoiceXP, addVoiceMinutes, getReward, getLevelChannel, getMultiplier, updateDailyStreak, isMilestoneLevel, getChatData, getVoiceData, computeOverallLevel } = db;
+const jsonDb = require('./jsonDb');
+const {
+  addChatXP,
+  addVoiceXP,
+  addVoiceMinutes,
+  getReward,
+  getLevelChannel,
+  getMultiplier,
+  updateDailyStreak,
+  isMilestoneLevel,
+  getChatData,
+  getVoiceData,
+  computeOverallLevel,
+  getPointsData,
+  computePointsGainedInRange,
+} = db;
 const { createLevelUpGIF } = require('./levelUpCard');
 
 // Track user yang sedang di voice channel
 const voiceTracker = new Map(); // key: `${guildId}_${userId}` => joinTimestamp
 
-// Chat XP config — XP sangat kecil supaya leveling benar-benar challenging.
-// Rata-rata 6 XP/pesan, cooldown 3 menit -> max ~120 XP/hari dari chat (20 pesan)
-const CHAT_XP_MIN = 3;
-const CHAT_XP_MAX = 8;
-const CHAT_COOLDOWN_MS = 3 * 60 * 1000; // 3 menit cooldown per user
+// Chat XP config — seimbang tanpa limitasi ketat (8-15 XP/pesan, cooldown 1 menit)
+const CHAT_XP_MIN = 8;
+const CHAT_XP_MAX = 15;
+const CHAT_COOLDOWN_MS = 60 * 1000; // 1 menit cooldown per user (mencegah spam)
 const chatCooldown = new Map(); // key: `${guildId}_${userId}` => lastMessageTimestamp
 
-// Voice XP config — 4 XP/menit, sangat ketat.
-// 3 jam/hari = 720 XP/hari dari voice
-const VOICE_XP_PER_MINUTE = 4;
+// Voice XP config — 6 XP/menit
+const VOICE_XP_PER_MINUTE = 6;
+
+/**
+ * Cari channel tujuan untuk announce level up di guild
+ */
+function resolveAnnounceChannel(guild, fallbackChannel = null) {
+  const savedChannelId = getLevelChannel(guild.id);
+  if (savedChannelId) {
+    const saved = guild.channels.cache.get(savedChannelId);
+    if (saved) return saved;
+  }
+  if (fallbackChannel) return fallbackChannel;
+  if (guild.systemChannel) return guild.systemChannel;
+  return guild.channels.cache.find(
+    (c) => c.type === ChannelType.GuildText && c.permissionsFor(guild.members.me)?.has('SendMessages')
+  ) || null;
+}
+
+/**
+ * Cek apakah ada level milestone di rentang (oldLevel, newLevel]
+ */
+function hasMilestoneInRange(oldLevel, newLevel) {
+  for (let lvl = oldLevel + 1; lvl <= newLevel; lvl++) {
+    if (isMilestoneLevel(lvl)) return true;
+  }
+  return false;
+}
+
+/**
+ * Berikan semua role reward yang dicapai di rentang (oldLevel, newLevel]
+ */
+async function grantRoleRewardsInRange(guild, member, type, oldLevel, newLevel) {
+  const grantedRoles = [];
+  if (!member) return grantedRoles;
+
+  for (let lvl = oldLevel + 1; lvl <= newLevel; lvl++) {
+    const rewardRoleId = getReward(guild.id, type, lvl);
+    if (!rewardRoleId) continue;
+
+    try {
+      const role = guild.roles.cache.get(rewardRoleId);
+      if (role && !member.roles.cache.has(rewardRoleId)) {
+        await member.roles.add(role);
+        grantedRoles.push(role);
+      }
+    } catch (err) {
+      console.error(`Gagal kasih ${type} role reward (level ${lvl}): ${err.message}`);
+    }
+  }
+
+  return grantedRoles;
+}
 
 /**
  * Handle message untuk chat XP
@@ -46,11 +110,11 @@ async function handleMessageCreate(message) {
   const result = addChatXP(guildId, userId, xpGain);
 
   if (result.leveledUp) {
-    handleLevelUp(message, userId, result.newLevel, 'chat', reason);
+    await handleLevelUp(message, userId, result.oldLevel, result.newLevel, 'chat', reason);
   }
 
   // Cek overall level up (gabungan chat + voice)
-  await checkOverallLevelUp(message.guild, message.member, message.author);
+  await checkOverallLevelUp(message.guild, message.member, message.author, message.channel);
 }
 
 /**
@@ -58,6 +122,9 @@ async function handleMessageCreate(message) {
  * Rule: tidak server deafen, tidak self deafen, bukan di AFK channel, dan tidak sendirian
  */
 function isEligibleForVoiceXP(voiceState) {
+  if (!voiceState || !voiceState.channelId) return false;
+  if (voiceState.member?.user?.bot) return false;
+
   // Server deafen → tidak dapat XP
   if (voiceState.serverDeaf) return false;
 
@@ -65,7 +132,7 @@ function isEligibleForVoiceXP(voiceState) {
   if (voiceState.selfDeaf) return false;
 
   // Di AFK channel → tidak dapat XP
-  if (voiceState.channelId && voiceState.guild.afkChannelId === voiceState.channelId) return false;
+  if (voiceState.guild.afkChannelId === voiceState.channelId) return false;
 
   // Sendirian di channel (hanya 1 human) → tidak dapat XP
   if (voiceState.channel) {
@@ -77,9 +144,40 @@ function isEligibleForVoiceXP(voiceState) {
 }
 
 /**
+ * Sinkronkan status tracking seluruh member human di sebuah voice channel
+ * (Mulai track jika sekarang ada >=2 human & eligible, atau stop track jika tersisa <2 human)
+ */
+function syncChannelVoiceTracking(voiceChannel, excludeUserId = null) {
+  if (!voiceChannel) return;
+  const guild = voiceChannel.guild;
+  const humanMembers = voiceChannel.members.filter((m) => !m.user.bot);
+
+  if (humanMembers.size >= 2) {
+    for (const member of humanMembers.values()) {
+      if (member.id === excludeUserId) continue;
+      const key = `${guild.id}_${member.id}`;
+      if (!voiceTracker.has(key) && member.voice && isEligibleForVoiceXP(member.voice)) {
+        voiceTracker.set(key, Date.now());
+      }
+    }
+  } else {
+    for (const member of humanMembers.values()) {
+      if (member.id === excludeUserId) continue;
+      const key = `${guild.id}_${member.id}`;
+      if (voiceTracker.has(key)) {
+        processVoiceLeave(guild, member.id, key);
+      }
+    }
+  }
+}
+
+/**
  * Handle voice state update (join/leave/move/mute/deafen/AFK)
  */
 function handleVoiceStateUpdate(oldState, newState) {
+  // Jangan pernah track bot di voice channel
+  if (newState.member?.user?.bot || oldState.member?.user?.bot) return;
+
   const guildId = newState.guild.id;
   const userId = newState.id;
   const trackKey = `${guildId}_${userId}`;
@@ -92,104 +190,48 @@ function handleVoiceStateUpdate(oldState, newState) {
     if (isEligibleForVoiceXP(newState)) {
       voiceTracker.set(trackKey, Date.now());
     }
-
-    // Cek user lain yang sudah ada di channel — mungkin sebelumnya sendirian (tidak ter-track)
-    // Sekarang ada 2+ human, user lain mulai dapat XP juga
-    const newVoiceChannel = newState.channel;
-    if (newVoiceChannel) {
-      const humanMembers = newVoiceChannel.members.filter((m) => !m.user.bot);
-      if (humanMembers.size >= 2) {
-        for (const member of humanMembers.values()) {
-          if (member.id === userId) continue; // skip user yang baru join (sudah di-track di atas)
-          const existingKey = `${guildId}_${member.id}`;
-          if (!voiceTracker.has(existingKey)) {
-            // Cek eligible untuk member yang sudah ada
-            const memberVoiceState = member.voice;
-            if (memberVoiceState && isEligibleForVoiceXP(memberVoiceState)) {
-              voiceTracker.set(existingKey, Date.now());
-            }
-          }
-        }
-      }
-    }
+    syncChannelVoiceTracking(newState.channel, userId);
     return;
   }
 
   // User LEAVE voice channel
   if (oldChannel && !newChannel) {
     processVoiceLeave(newState.guild, userId, trackKey);
-
-    // Cek user lain yang tersisa di channel lama — kalau tersisa 1 human, dia jadi sendirian
-    const oldVoiceChannel = oldState.channel;
-    if (oldVoiceChannel) {
-      const remainingHumans = oldVoiceChannel.members.filter((m) => !m.user.bot);
-      if (remainingHumans.size < 2) {
-        // User yang tersisa sekarang sendirian — proses XP & stop tracking
-        for (const member of remainingHumans.values()) {
-          const remainingKey = `${guildId}_${member.id}`;
-          if (voiceTracker.has(remainingKey)) {
-            processVoiceLeave(newState.guild, member.id, remainingKey);
-          }
-        }
-      }
-    }
+    syncChannelVoiceTracking(oldState.channel, userId);
     return;
   }
 
   // User MOVE antar voice channel
   if (oldChannel && newChannel && oldChannel !== newChannel) {
     processVoiceLeave(newState.guild, userId, trackKey);
-
-    // Cek user lain yang tersisa di channel lama (mungkin jadi sendirian)
-    const oldVoiceChannel = oldState.channel;
-    if (oldVoiceChannel) {
-      const remainingHumans = oldVoiceChannel.members.filter((m) => !m.user.bot);
-      if (remainingHumans.size < 2) {
-        for (const member of remainingHumans.values()) {
-          const remainingKey = `${guildId}_${member.id}`;
-          if (voiceTracker.has(remainingKey)) {
-            processVoiceLeave(newState.guild, member.id, remainingKey);
-          }
-        }
-      }
-    }
+    syncChannelVoiceTracking(oldState.channel, userId);
 
     if (isEligibleForVoiceXP(newState)) {
       voiceTracker.set(trackKey, Date.now());
     }
+    syncChannelVoiceTracking(newState.channel, userId);
     return;
   }
 
   // State berubah tanpa pindah channel (mute/unmute/deafen/undeafen/AFK)
   if (oldChannel && newChannel && oldChannel === newChannel) {
-    const wasEligible = isEligibleForVoiceXP(oldState);
-    const isEligible = isEligibleForVoiceXP(newState);
+    const isNowEligible = isEligibleForVoiceXP(newState);
 
-    if (wasEligible && !isEligible) {
+    if (voiceTracker.has(trackKey) && !isNowEligible) {
       // Dari eligible → tidak eligible: proses XP untuk waktu yang sudah berlalu, stop tracking
       processVoiceLeave(newState.guild, userId, trackKey);
-    } else if (!wasEligible && isEligible) {
+    } else if (!voiceTracker.has(trackKey) && isNowEligible) {
       // Dari tidak eligible → eligible: mulai tracking dari sekarang
       voiceTracker.set(trackKey, Date.now());
     }
-    // Kalau wasEligible && isEligible → tidak ada perubahan, tetap tracking
-    // Kalau !wasEligible && !isEligible → tetap tidak tracking
   }
 }
 
 /**
- * Proses ketika user keluar dari voice channel: hitung menit & kasih XP
+ * Berikan Voice XP untuk `minutesElapsed` menit dan proses level up / role reward / overall level up
  */
-async function processVoiceLeave(guild, userId, trackKey) {
-  if (!voiceTracker.has(trackKey)) return;
-
-  const joinTime = voiceTracker.get(trackKey);
-  const leaveTime = Date.now();
-  const minutesElapsed = Math.floor((leaveTime - joinTime) / 60000);
-
-  voiceTracker.delete(trackKey);
-
-  if (minutesElapsed < 1) return; // Minimal 1 menit untuk dapat XP
+async function awardVoiceXPForMinutes(guild, userId, minutesElapsed) {
+  if (minutesElapsed < 1) return;
 
   const guildId = guild.id;
 
@@ -206,61 +248,112 @@ async function processVoiceLeave(guild, userId, trackKey) {
   const xpGain = Math.floor(baseVoiceXP * multiplier) + (streakInfo.bonusXP || 0);
   const result = addVoiceXP(guildId, userId, xpGain);
 
-  // Cek overall level up (gabungan chat + voice)
-  const member = guild.members.cache.get(userId);
-  if (member) {
-    await checkOverallLevelUp(guild, member, member.user);
-  }
+  const member = guild.members.cache.get(userId)
+    || await guild.members.fetch(userId).catch(() => null);
 
-  if (result.leveledUp && isMilestoneLevel(result.newLevel)) {
-    const savedChannelId = getLevelChannel(guildId);
-    const channel = (savedChannelId && guild.channels.cache.get(savedChannelId))
-      || guild.systemChannel
-      || guild.channels.cache.find(
-          (c) => c.type === ChannelType.GuildText && c.permissionsFor(guild.members.me)?.has('SendMessages')
-        );
+  if (result.leveledUp) {
+    const oldLevel = result.oldLevel ?? (result.newLevel - 1);
+    const isMilestone = hasMilestoneInRange(oldLevel, result.newLevel);
+
+    // Selalu berikan semua role reward di level yang dicapai
+    const grantedRoles = await grantRoleRewardsInRange(guild, member, 'voice', oldLevel, result.newLevel);
+    const channel = resolveAnnounceChannel(guild);
+
     if (channel && member) {
+      for (const role of grantedRoles) {
+        channel.send(`🎁 ${member} dapat role baru: **${role.name}**!`).catch(() => {});
+      }
+
+      const pointsGained = Math.max(1, computePointsGainedInRange('voice', oldLevel, result.newLevel));
+      const pointsBalance = getPointsData(guildId, userId).balance;
+      const milestoneTag = isMilestone ? ' 🏆 **MILESTONE BONUS!**' : '';
+      const pointsTag = ` • 🪙 **+${pointsGained} Poin** *(Saldo: ${pointsBalance} Poin)*${milestoneTag}`;
+
       try {
-        const { createLevelUpGIF } = require('./levelUpCard');
         const gifBuffer = await createLevelUpGIF({
           username: member.displayName,
           avatarURL: member.user.displayAvatarURL({ extension: 'png', size: 256 }),
-          oldLevel: result.newLevel - 1,
+          oldLevel,
           newLevel: result.newLevel,
           type: 'voice',
         });
         await channel.send({
-          content: `🎉 ${member} naik ke **🎙️ Voice Level ${result.newLevel}**!${voiceReason ? ` ⚡ **${voiceReason}**` : ''}`,
-          files: [{ attachment: gifBuffer, name: 'levelup-voice.gif' }],
+          content: `🎉 ${member} naik ke **🎙️ Voice Level ${result.newLevel}**!${pointsTag}${voiceReason ? ` ⚡ **${voiceReason}**` : ''}`,
+          files: gifBuffer ? [{ attachment: gifBuffer, name: 'levelup-voice.gif' }] : [],
         });
       } catch (err) {
         console.error('Gagal generate voice level up GIF:', err.message);
-        channel.send(`🎙️ **${member.displayName}** naik ke **Voice Level ${result.newLevel}**! Mantap bos!`)
+        channel.send(`🎙️ **${member.displayName}** naik ke **Voice Level ${result.newLevel}**!${pointsTag} Mantap bos!`)
           .catch(() => {});
       }
     }
-  } else if (result.leveledUp) {
-    // Level naik tapi bukan milestone — tetap kasih role reward kalau ada (tanpa notif)
-    const rewardRoleId = getReward(guildId, 'voice', result.newLevel);
-    if (rewardRoleId && member) {
-      try {
-        const role = guild.roles.cache.get(rewardRoleId);
-        if (role && !member.roles.cache.has(rewardRoleId)) {
-          await member.roles.add(role);
-        }
-      } catch (err) {
-        console.error(`Gagal kasih voice role reward: ${err.message}`);
-      }
+  }
+
+  // Cek overall level up (gabungan chat + voice)
+  if (member) {
+    await checkOverallLevelUp(guild, member, member.user);
+  }
+}
+
+/**
+ * Proses ketika user keluar dari voice channel: hitung menit & kasih XP
+ */
+async function processVoiceLeave(guild, userId, trackKey) {
+  if (!voiceTracker.has(trackKey)) return;
+
+  const joinTime = voiceTracker.get(trackKey);
+  const leaveTime = Date.now();
+  const minutesElapsed = Math.floor((leaveTime - joinTime) / 60000);
+
+  voiceTracker.delete(trackKey);
+
+  if (minutesElapsed < 1) return; // Minimal 1 menit untuk dapat XP
+  await awardVoiceXPForMinutes(guild, userId, minutesElapsed);
+}
+
+/**
+ * Checkpoint berkala untuk semua sesi voice yang sedang aktif.
+ * Menyimpan XP voice tiap beberapa menit tanpa harus menunggu user keluar dari voice channel,
+ * sehingga XP tetap aman walau bot restart dan realtime saat dicek di /rank atau /status.
+ */
+async function flushActiveVoiceSessions(client, stopTracking = false) {
+  const now = Date.now();
+  for (const [trackKey, joinTime] of Array.from(voiceTracker.entries())) {
+    const [guildId, userId] = trackKey.split('_');
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild) {
+      voiceTracker.delete(trackKey);
+      continue;
     }
+
+    const voiceState = guild.voiceStates.cache.get(userId);
+    if (!stopTracking && (!voiceState?.channelId || !isEligibleForVoiceXP(voiceState))) {
+      await processVoiceLeave(guild, userId, trackKey);
+      continue;
+    }
+
+    const minutesElapsed = Math.floor((now - joinTime) / 60000);
+    if (minutesElapsed < 1) {
+      if (stopTracking) voiceTracker.delete(trackKey);
+      continue;
+    }
+
+    if (stopTracking) {
+      voiceTracker.delete(trackKey);
+    } else {
+      // Geser joinTime sebesar menit yang sudah diklaim agar sisa detik tidak hilang
+      voiceTracker.set(trackKey, joinTime + minutesElapsed * 60000);
+    }
+
+    await awardVoiceXPForMinutes(guild, userId, minutesElapsed);
   }
 }
 
 /**
  * Cek apakah overall level (gabungan chat + voice) naik.
- * Kalau naik dan milestone, kirim notif + kasih role reward 'overall'.
- * Overall level tidak disimpan — dihitung on-the-fly dari totalXp chat + voice.
+ * Kalau naik, kasih role reward 'overall' dan kirim notif GIF saat milestone.
  */
-async function checkOverallLevelUp(guild, member, user) {
+async function checkOverallLevelUp(guild, member, user, fallbackChannel = null) {
   const guildId = guild.id;
   const userId = user.id;
 
@@ -268,106 +361,93 @@ async function checkOverallLevelUp(guild, member, user) {
   const voiceData = getVoiceData(guildId, userId);
   const overall = computeOverallLevel(chatData.totalXp, voiceData.totalXp, chatData.level, voiceData.level);
 
-  // Cek overall level sebelumnya yang disimpan
   const prevOverallLevelKey = `overall_${guildId}_${userId}_level`;
-  const dbRaw = require('./jsonDb');
-  const prevLevel = dbRaw.get(prevOverallLevelKey) || 0;
+  const prevLevel = jsonDb.get(prevOverallLevelKey) || 0;
 
   if (overall.level > prevLevel) {
-    // Simpan level overall baru
-    dbRaw.set(prevOverallLevelKey, overall.level);
-
+    jsonDb.set(prevOverallLevelKey, overall.level);
     const newOverallLevel = overall.level;
 
-    // Cek role reward overall
-    const rewardRoleId = getReward(guildId, 'overall', newOverallLevel);
-    if (rewardRoleId && member) {
-      try {
-        const role = guild.roles.cache.get(rewardRoleId);
-        if (role && !member.roles.cache.has(rewardRoleId)) {
-          await member.roles.add(role);
-        }
-      } catch (err) {
-        console.error(`Gagal kasih overall role reward: ${err.message}`);
-      }
-    }
+    // Berikan semua role reward overall yang dicapai di rentang (prevLevel, newOverallLevel]
+    const grantedRoles = await grantRoleRewardsInRange(guild, member, 'overall', prevLevel, newOverallLevel);
 
-    // Notif hanya kalau milestone
-    if (isMilestoneLevel(newOverallLevel)) {
-      const savedChannelId = getLevelChannel(guildId);
-      const channel = (savedChannelId && guild.channels.cache.get(savedChannelId))
-        || guild.systemChannel
-        || guild.channels.cache.find(
-            (c) => c.type === ChannelType.GuildText && c.permissionsFor(guild.members.me)?.has('SendMessages')
-          );
+    if (hasMilestoneInRange(prevLevel, newOverallLevel) || grantedRoles.length > 0) {
+      const channel = resolveAnnounceChannel(guild, fallbackChannel);
       if (channel) {
-        channel.send(`🌟 ${member} naik ke **Overall Level ${newOverallLevel}**! (Chat Lv.${chatData.level} + Voice Lv.${voiceData.level})`)
-          .catch(() => {});
+        for (const role of grantedRoles) {
+          channel.send(`🎁 ${member || user} dapat role baru: **${role.name}**!`).catch(() => {});
+        }
+
+        const pointsGained = Math.max(1, computePointsGainedInRange('overall', prevLevel, newOverallLevel));
+        const pointsBalance = getPointsData(guildId, userId).balance;
+        const pointsTag = ` • 🪙 **+${pointsGained} Poin** *(Saldo: ${pointsBalance} Poin)*`;
+
+        const displayName = member ? member.displayName : user.username;
+        try {
+          const gifBuffer = await createLevelUpGIF({
+            username: displayName,
+            avatarURL: user.displayAvatarURL({ extension: 'png', size: 256 }),
+            oldLevel: prevLevel,
+            newLevel: newOverallLevel,
+            type: 'overall',
+          });
+          await channel.send({
+            content: `🌟 ${member || user} naik ke **Overall Level ${newOverallLevel}**! (Chat Lv.${chatData.level} + Voice Lv.${voiceData.level})${pointsTag}`,
+            files: gifBuffer ? [{ attachment: gifBuffer, name: 'levelup-overall.gif' }] : [],
+          });
+        } catch (err) {
+          console.error('Gagal generate overall level up GIF:', err.message);
+          channel.send(`🌟 ${member || user} naik ke **Overall Level ${newOverallLevel}**! (Chat Lv.${chatData.level} + Voice Lv.${voiceData.level})${pointsTag}`)
+            .catch(() => {});
+        }
       }
     }
+  } else if (overall.level < prevLevel) {
+    jsonDb.set(prevOverallLevelKey, overall.level);
   }
 }
 
 /**
- * Handle level up: kirim GIF animasi & kasih role reward.
- * Notif channel HANYA dikirim kalau level adalah milestone (5, 10, 20, 30, ...).
- * Role reward tetap dikasih di setiap level yang punya reward, tanpa notif.
+ * Handle level up: kirim GIF animasi & kasih role reward di setiap kenaikan level!
  */
-async function handleLevelUp(message, userId, newLevel, type, eventReason = null) {
-  const guildId = message.guild.id;
+async function handleLevelUp(message, userId, oldLevel, newLevel, type, eventReason = null) {
+  const guild = message.guild;
   const member = message.member;
-  const oldLevel = newLevel - 1;
+  const fromLevel = oldLevel ?? (newLevel - 1);
 
-  // Cek role reward (tetap dikasih di semua level, tidak peduli milestone)
-  const rewardRoleId = getReward(guildId, type, newLevel);
-  if (rewardRoleId && member) {
-    try {
-      const role = message.guild.roles.cache.get(rewardRoleId);
-      if (role && !member.roles.cache.has(rewardRoleId)) {
-        await member.roles.add(role);
-        // Hanya announce role kalau milestone level
-        if (isMilestoneLevel(newLevel)) {
-          const savedChannelId = getLevelChannel(guildId);
-          const announceChannel = (savedChannelId && message.guild.channels.cache.get(savedChannelId))
-            || message.channel;
-          announceChannel.send(`🎁 ${message.author} dapat role baru: **${role.name}**!`)
-            .catch(() => {});
-        }
-      }
-    } catch (err) {
-      console.error(`Gagal kasih role reward: ${err.message}`);
-    }
+  // Berikan semua role reward di rentang (fromLevel, newLevel]
+  const grantedRoles = await grantRoleRewardsInRange(guild, member, type, fromLevel, newLevel);
+  const isMilestone = hasMilestoneInRange(fromLevel, newLevel);
+
+  const announceChannel = resolveAnnounceChannel(guild, message.channel);
+  if (!announceChannel) return;
+
+  for (const role of grantedRoles) {
+    announceChannel.send(`🎁 ${message.author} dapat role baru: **${role.name}**!`).catch(() => {});
   }
 
-  // Hanya kirim GIF/announce kalau level adalah milestone
-  if (!isMilestoneLevel(newLevel)) return;
-
+  const pointsGained = Math.max(1, computePointsGainedInRange(type, fromLevel, newLevel));
+  const pointsBalance = getPointsData(guild.id, userId).balance;
+  const milestoneTag = isMilestone ? ' 🏆 **MILESTONE BONUS!**' : '';
+  const pointsTag = ` • 🪙 **+${pointsGained} Poin** *(Saldo: ${pointsBalance} Poin)*${milestoneTag}`;
   const eventTag = eventReason ? ` ⚡ **${eventReason}**` : '';
 
-  // Tentukan channel tujuan announce
-  const savedChannelId = getLevelChannel(guildId);
-  const announceChannel = (savedChannelId && message.guild.channels.cache.get(savedChannelId))
-    || message.channel;
-
   try {
-    // Generate animated GIF level up card
     const gifBuffer = await createLevelUpGIF({
-      username: member.displayName,
+      username: member ? member.displayName : message.author.username,
       avatarURL: message.author.displayAvatarURL({ extension: 'png', size: 256 }),
-      oldLevel,
+      oldLevel: fromLevel,
       newLevel,
       type,
     });
 
-    // Kirim GIF dengan mention
     await announceChannel.send({
-      content: `🎉 ${message.author} naik ke **${type === 'chat' ? '💬 Chat' : '🎙️ Voice'} Level ${newLevel}**!${eventTag}`,
-      files: [{ attachment: gifBuffer, name: `levelup-${type}.gif` }],
+      content: `🎉 ${message.author} naik ke **${type === 'chat' ? '💬 Chat' : '🎙️ Voice'} Level ${newLevel}**!${pointsTag}${eventTag}`,
+      files: gifBuffer ? [{ attachment: gifBuffer, name: `levelup-${type}.gif` }] : [],
     });
   } catch (err) {
-    // Fallback: text only kalau GIF gagal generate
     console.error('Gagal generate level up GIF:', err.message);
-    announceChannel.send(`🎉 ${message.author} naik ke **${type === 'chat' ? '💬 Chat' : '🎙️ Voice'} Level ${newLevel}**! Selamat!${eventTag}`)
+    announceChannel.send(`🎉 ${message.author} naik ke **${type === 'chat' ? '💬 Chat' : '🎙️ Voice'} Level ${newLevel}**! Selamat!${pointsTag}${eventTag}`)
       .catch(() => {});
   }
 }
@@ -379,7 +459,6 @@ function initVoiceTracking(client) {
   client.guilds.cache.forEach((guild) => {
     guild.voiceStates.cache.forEach((voiceState) => {
       if (voiceState.channelId && !voiceState.member?.user?.bot) {
-        // Hanya track jika eligible (tidak deafen, tidak AFK, tidak sendirian)
         if (isEligibleForVoiceXP(voiceState)) {
           const trackKey = `${guild.id}_${voiceState.id}`;
           voiceTracker.set(trackKey, Date.now());
@@ -393,4 +472,5 @@ module.exports = {
   handleMessageCreate,
   handleVoiceStateUpdate,
   initVoiceTracking,
+  flushActiveVoiceSessions,
 };

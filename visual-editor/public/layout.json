@@ -15,17 +15,17 @@
   "title": {
     "enabled": true,
     "text": "LEVEL UP",
-    "x": 350,
-    "y": 65,
-    "fontSize": 36,
+    "x": 363,
+    "y": 59,
+    "fontSize": 50,
     "font": "Jacatra",
     "color": "#1b45f4",
     "outlineColor": "#ffffff"
   },
   "username": {
     "enabled": true,
-    "x": 350,
-    "y": 93,
+    "x": 352,
+    "y": 122,
     "fontSize": 16,
     "color": "#0a0a1a"
   },
@@ -65,6 +65,11 @@
       "blue": "#e94560",
       "lightBlue": "#ff6b8a",
       "label": "VOICE XP"
+    },
+    "overall": {
+      "blue": "#9b59b6",
+      "lightBlue": "#c39bd3",
+      "label": "OVERALL XP"
     }
   }
 }

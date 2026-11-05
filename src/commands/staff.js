@@ -1,5 +1,14 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const {
+  SlashCommandBuilder,
+  EmbedBuilder,
+  PermissionFlagsBits,
+  ActionRowBuilder,
+  StringSelectMenuBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+} = require('discord.js');
 const staffDb = require('../utils/staffDb');
+const jsonDb = require('../utils/jsonDb');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -198,7 +207,8 @@ module.exports = {
         return interaction.reply({ content: `❌ ${targetUser} bukan staff.`, ephemeral: true });
       }
 
-      const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+      const member = interaction.guild.members.cache.get(targetUser.id)
+        || await interaction.guild.members.fetch(targetUser.id).catch(() => null);
       const statusEmoji = getPresenceEmoji(member?.presence?.status);
 
       // Format divisi dengan title masing-masing
@@ -230,15 +240,19 @@ module.exports = {
       }
 
       // Hapus semua staff & divisi
-      const allData = require('../utils/jsonDb').all();
       const prefix = `staff_${guildId}_`;
+      const keysToDelete = [];
       let removed = 0;
-      for (const entry of allData) {
-        if (entry.ID.startsWith(prefix) || entry.ID === `staff_divisions_${guildId}`) {
-          require('../utils/jsonDb').delete(entry.ID);
-          if (entry.ID.endsWith('_divisions') && Array.isArray(entry.data)) removed++;
-        }
+
+      jsonDb.forEachPrefix(prefix, (key, value) => {
+        keysToDelete.push(key);
+        if (key.endsWith('_divisions') && Array.isArray(value)) removed++;
+      });
+
+      for (const k of keysToDelete) {
+        jsonDb.delete(k);
       }
+      jsonDb.delete(`staff_divisions_${guildId}`);
       staffDb.clearDirectoryMessage(guildId);
 
       await interaction.reply({ content: `✅ Dihapus **${removed}** staff dan semua divisi. Directory reset.`, ephemeral: true });
@@ -280,7 +294,9 @@ module.exports = {
       const sent = await interaction.editReply({ embeds: [embed], components, fetchReply: true });
 
       // Simpan ID pesan untuk auto-update
-      staffDb.setDirectoryMessage(guildId, sent.id, interaction.channel.id);
+      if (sent?.id) {
+        staffDb.setDirectoryMessage(guildId, sent.id, interaction.channel.id);
+      }
 
       return;
     }
@@ -309,23 +325,25 @@ function getPresenceEmoji(status) {
  * Build embed directory + components (dropdown, button).
  */
 async function buildDirectoryEmbed(guild) {
-  const staffDb = require('../utils/staffDb');
-  const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-
   const guildId = guild.id;
   const allStaff = staffDb.getAllStaff(guildId);
   const divNames = staffDb.getDivisionNames(guildId);
   const totalStaff = staffDb.getStaffCount(guildId);
   const activeDivisions = allStaff.filter((d) => d.members.length > 0).length;
 
-  // Cek staff aktif (online/idle/dnd)
-  let activeStaff = 0;
+  // Hitung staff aktif berdasarkan user unik (supaya staff yang merangkap divisi tidak dihitung ganda)
+  const uniqueStaffIds = new Set();
   for (const div of allStaff) {
     for (const member of div.members) {
-      const m = guild.members.cache.get(member.userId);
-      if (m?.presence?.status && m.presence.status !== 'offline') {
-        activeStaff++;
-      }
+      uniqueStaffIds.add(member.userId);
+    }
+  }
+
+  let activeStaff = 0;
+  for (const userId of uniqueStaffIds) {
+    const m = guild.members.cache.get(userId);
+    if (m?.presence?.status && m.presence.status !== 'offline') {
+      activeStaff++;
     }
   }
 
@@ -358,7 +376,7 @@ async function buildDirectoryEmbed(guild) {
     for (const member of div.members) {
       const m = guild.members.cache.get(member.userId);
       const emoji = getPresenceEmoji(m?.presence?.status);
-      const displayName = m?.displayName || member.userId;
+      const displayName = m?.displayName || `<@${member.userId}>`;
       const titleSuffix = member.title ? ` — ${member.title}` : '';
       lines.push(`${emoji}  **${displayName}**${titleSuffix}`);
     }

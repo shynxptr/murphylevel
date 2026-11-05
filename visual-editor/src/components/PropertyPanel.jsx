@@ -66,53 +66,66 @@ function ColorControl({ value, onChange }) {
  * Theme color editor sub-panel.
  */
 function ThemeEditor({ theme, onChange }) {
+  const fallback = {
+    chat: { blue: '#1b45f4', lightBlue: '#4b7bff', label: 'CHAT XP' },
+    voice: { blue: '#e94560', lightBlue: '#ff6b8a', label: 'VOICE XP' },
+    overall: { blue: '#9b59b6', lightBlue: '#c39bd3', label: 'OVERALL XP' },
+  };
+
   const handleThemeChange = (type, key, value) => {
+    const current = theme[type] || fallback[type];
     const updated = {
       ...theme,
-      [type]: { ...theme[type], [key]: value },
+      [type]: { ...current, [key]: value },
     };
     onChange(updated);
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {['chat', 'voice'].map((type) => (
-        <div key={type}>
-          <div
-            className="prop-group-header"
-            style={{ cursor: 'default', marginBottom: 4 }}
-          >
-            <span className="prop-group-title">
-              {type === 'chat' ? '🔵 Chat Theme' : '🔴 Voice Theme'}
-            </span>
+      {['chat', 'voice', 'overall'].map((type) => {
+        const current = theme[type] || fallback[type];
+        const title = type === 'chat'
+          ? '🔵 Chat Theme'
+          : type === 'voice'
+            ? '🔴 Voice Theme'
+            : '🟣 Overall Theme';
+        return (
+          <div key={type}>
+            <div
+              className="prop-group-header"
+              style={{ cursor: 'default', marginBottom: 4 }}
+            >
+              <span className="prop-group-title">{title}</span>
+            </div>
+            <div className="prop-group-body">
+              <div className="prop-row">
+                <span className="prop-label">Primary</span>
+                <ColorControl
+                  value={current.blue}
+                  onChange={(v) => handleThemeChange(type, 'blue', v)}
+                />
+              </div>
+              <div className="prop-row">
+                <span className="prop-label">Light</span>
+                <ColorControl
+                  value={current.lightBlue}
+                  onChange={(v) => handleThemeChange(type, 'lightBlue', v)}
+                />
+              </div>
+              <div className="prop-row">
+                <span className="prop-label">Label</span>
+                <input
+                  className="prop-input"
+                  type="text"
+                  value={current.label}
+                  onChange={(e) => handleThemeChange(type, 'label', e.target.value)}
+                />
+              </div>
+            </div>
           </div>
-          <div className="prop-group-body">
-            <div className="prop-row">
-              <span className="prop-label">Primary</span>
-              <ColorControl
-                value={theme[type].blue}
-                onChange={(v) => handleThemeChange(type, 'blue', v)}
-              />
-            </div>
-            <div className="prop-row">
-              <span className="prop-label">Light</span>
-              <ColorControl
-                value={theme[type].lightBlue}
-                onChange={(v) => handleThemeChange(type, 'lightBlue', v)}
-              />
-            </div>
-            <div className="prop-row">
-              <span className="prop-label">Label</span>
-              <input
-                className="prop-input"
-                type="text"
-                value={theme[type].label}
-                onChange={(e) => handleThemeChange(type, 'label', e.target.value)}
-              />
-            </div>
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

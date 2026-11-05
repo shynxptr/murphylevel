@@ -611,6 +611,9 @@
 .theme-btn.active.voice {
   background: #e94560;
 }
+.theme-btn.active.overall {
+  background: #9b59b6;
+}
 
 /* Status bar */
 .statusbar {
