@@ -416,7 +416,7 @@ module.exports = {
         );
       }
 
-      if (points.balance < plan.price) {
+      if (points.balance < plan.price && !isTester) {
         return interaction.editReply(
           `❌ Poin kamu belum cukup untuk paket **${plan.label}**! Harga: **${plan.price} Poin**, saldo dompetmu: **${points.balance} / ${points.walletCap} Poin** *(kurang ${plan.price - points.balance} Poin)*.`
         );
@@ -522,7 +522,7 @@ module.exports = {
       }
 
       const points = db.getPointsData(guildId, userId);
-      if (points.balance < plan.price) {
+      if (points.balance < plan.price && !db.isRoleTester(userId)) {
         return interaction.editReply(
           `❌ Poin kamu belum cukup untuk paket **${plan.label}**! Harga: **${plan.price} Poin**, saldo dompetmu: **${points.balance} / ${points.walletCap} Poin** *(kurang ${plan.price - points.balance} Poin)*.`
         );
@@ -566,7 +566,7 @@ module.exports = {
       }
 
       const points = db.getPointsData(guildId, userId);
-      if (points.balance < customCfg.shareSlotPrice) {
+      if (points.balance < customCfg.shareSlotPrice && !db.isRoleTester(userId)) {
         return interaction.editReply(
           `❌ Poin kamu belum cukup! Harga +1 Slot Share: **${customCfg.shareSlotPrice} Poin**, saldo kamu: **${points.balance} Poin** *(kurang ${customCfg.shareSlotPrice - points.balance} Poin)*.`
         );

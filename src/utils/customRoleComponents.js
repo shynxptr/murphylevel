@@ -753,7 +753,7 @@ async function handleCustomRoleInteraction(interaction) {
       return true;
     }
 
-    if (pts.balance < plan.price) {
+    if (pts.balance < plan.price && !isTester) {
       await interaction.followUp({
         content: `❌ Poin kamu belum cukup untuk paket **${plan.label}**! Harga: **${plan.price} Poin**, saldo dompetmu: **${pts.balance} / ${pts.walletCap} Poin** *(kurang ${plan.price - pts.balance} Poin)*.`,
         ephemeral: true,
@@ -911,7 +911,7 @@ async function handleCustomRoleInteraction(interaction) {
     }
 
     const pts = db.getPointsData(guildId, ownerId);
-    if (pts.balance < plan.price) {
+    if (pts.balance < plan.price && !isTester) {
       await interaction.reply({
         content: `❌ Poin kamu belum cukup untuk paket **${plan.label}**! Harga: **${plan.price} Poin**, saldo dompetmu: **${pts.balance} / ${pts.walletCap} Poin** *(kurang ${plan.price - pts.balance} Poin)*.`,
         ephemeral: true,
@@ -956,7 +956,7 @@ async function handleCustomRoleInteraction(interaction) {
     }
 
     const pts = db.getPointsData(guildId, ownerId);
-    if (pts.balance < cfg.shareSlotPrice) {
+    if (pts.balance < cfg.shareSlotPrice && !isTester) {
       await interaction.reply({
         content: `❌ Poin kamu belum cukup untuk membeli +1 Slot Share! Harga: **${cfg.shareSlotPrice} Poin**, saldo kamu: **${pts.balance} Poin** *(kurang ${cfg.shareSlotPrice - pts.balance} Poin)*.`,
         ephemeral: true,
@@ -1331,7 +1331,7 @@ async function handleCustomRoleInteraction(interaction) {
 
     if (!customData.hoistUnlocked) {
       const pts = db.getPointsData(guildId, ownerId);
-      if (pts.balance < cfg.hoistPrice) {
+      if (pts.balance < cfg.hoistPrice && !isTester) {
         await interaction.followUp({
           content: `🔒 Fitur **Hoist** (tampilkan role terpisah di daftar member) membutuhkan **${cfg.hoistPrice} Poin** untuk di-unlock!\n🪙 Saldo kamu saat ini: **${pts.balance} Poin** *(kurang ${cfg.hoistPrice - pts.balance} Poin)*.`,
           ephemeral: true,
@@ -1710,7 +1710,8 @@ async function handleCustomRoleShortcut(message, commandName, args) {
       return true;
     }
 
-    if (plan.durationMs) {
+    const isTester = db.isRoleTester(userId);
+    if (plan.durationMs && !isTester) {
       const now = Date.now();
       const baseTime = customData.expiresAt > now ? customData.expiresAt : now;
       const projectedRemainingDays = Math.ceil((baseTime + plan.durationMs - now) / (24 * 60 * 60 * 1000));
@@ -1724,7 +1725,7 @@ async function handleCustomRoleShortcut(message, commandName, args) {
     }
 
     const pts = db.getPointsData(guildId, userId);
-    if (pts.balance < plan.price) {
+    if (pts.balance < plan.price && !isTester) {
       await message.reply({
         content: `❌ Poin kamu belum cukup untuk paket **${plan.label}**! Harga: **${plan.price} Poin**, saldo dompetmu: **${pts.balance} / ${pts.walletCap} Poin** *(kurang ${plan.price - pts.balance} Poin)*.`,
         allowedMentions: { repliedUser: false },

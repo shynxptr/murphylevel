@@ -135,6 +135,18 @@ module.exports = {
         .addIntegerOption((opt) =>
           opt.setName('amount').setDescription('Jumlah poin yang dikurangi').setMinValue(1).setRequired(true)
         )
+    )
+    // Subcommand: reset-points
+    .addSubcommand((sub) =>
+      sub
+        .setName('reset-points')
+        .setDescription('Reset saldo dompet poin seluruh member di server (atau 1 user tertentu) menjadi 0 Poin')
+        .addUserOption((opt) =>
+          opt
+            .setName('user')
+            .setDescription('Kosongkan untuk reset SEMUA member di server ke 0 Poin, atau pilih 1 user')
+            .setRequired(false)
+        )
     ),
 
   async execute(interaction) {
@@ -287,6 +299,26 @@ module.exports = {
 
       await interaction.reply({
         content: `✅ Berhasil mengurangi **-${amount} Poin** dari ${targetUser}!\n🪙 Dompet poin ${targetUser.username} sekarang: **${updated.balance} / ${updated.walletCap} Poin**.`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    // =================== RESET-POINTS ===================
+    if (sub === 'reset-points') {
+      const targetUser = interaction.options.getUser('user');
+      if (targetUser) {
+        const updated = db.resetUserPoints(guildId, targetUser.id);
+        await interaction.reply({
+          content: `🔄 Saldo dompet poin ${targetUser} berhasil di-reset menjadi **${updated.balance} / ${updated.walletCap} Poin**!`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const count = db.resetAllMemberPoints(guildId);
+      await interaction.reply({
+        content: `🔄 Berhasil mereset saldo dompet poin **seluruh member di server ini (${count} data member)** menjadi **0 Poin**! Semua member kini mulai mengumpulkan poin dari 0 seiring kenaikan level & XP baru.`,
         ephemeral: true,
       });
     }

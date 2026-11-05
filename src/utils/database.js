@@ -841,19 +841,14 @@ function getPointsData(guildId, userId) {
 
   let wallet = db.get(walletKey);
   let lastRaw = db.get(lastRawKey);
-  const tester = isRoleTester(userId);
 
   if (typeof wallet !== 'number' || typeof lastRaw !== 'number') {
-    // Inisialisasi dompet pertama kali (dibatasi maksimal walletCap = 75 Poin; jika akun Tester langsung isi penuh 75 Poin)
-    const initialNet = tester ? walletCap : Math.max(0, rawGrindPoints + bonusPoints - spentPoints);
-    wallet = Math.min(walletCap, initialNet);
+    // Semua member mulai dari saldo 0 Poin (tidak mengambil poin retroaktif dari level lama;
+    // poin baru hanya masuk saat user naik level / grinding XP mulai dari sekarang)
+    wallet = 0;
     lastRaw = rawGrindPoints;
-    db.set(walletKey, wallet);
+    db.set(walletKey, 0);
     db.set(lastRawKey, lastRaw);
-  } else if (tester && wallet <= 0) {
-    // Auto-refill dompet Tester ke penuh jika habis saat mengetes fitur
-    wallet = walletCap;
-    db.set(walletKey, wallet);
   } else if (rawGrindPoints > lastRaw) {
     // User baru saja mendapat poin baru dari grinding XP / naik level → masukkan ke dompet s/d batas walletCap
     const gained = rawGrindPoints - lastRaw;
@@ -872,7 +867,7 @@ function getPointsData(guildId, userId) {
     db.set(walletKey, wallet);
   }
 
-  const totalEarned = Math.max(0, rawGrindPoints + bonusPoints);
+  const totalEarned = Math.max(0, wallet + spentPoints);
 
   return {
     balance: wallet,
@@ -899,12 +894,15 @@ function getPointsData(guildId, userId) {
  */
 function spendPoints(guildId, userId, amount) {
   const cost = Math.max(0, Math.floor(amount));
-  let current = getPointsData(guildId, userId);
+  const current = getPointsData(guildId, userId);
 
-  // Jika akun Tester dan saldo kurang saat mengetes pembelian, otomatis top-up ke walletCap
+  // Akun Tester diizinkan menguji pembelian role/fitur meskipun saldo dompet 0 Poin
   if (isRoleTester(userId) && current.balance < cost) {
-    db.set(`points_${guildId}_${userId}_wallet`, Math.max(current.walletCap, cost));
-    current = getPointsData(guildId, userId);
+    return {
+      success: true,
+      balance: current.balance,
+      spent: 0,
+    };
   }
 
   if (current.balance < cost) {
@@ -915,9 +913,7 @@ function spendPoints(guildId, userId, amount) {
     };
   }
 
-  const nextBalance = isRoleTester(userId)
-    ? current.walletCap // Akun Tester saldo dompetnya otomatis tetap penuh setelah transaksi test
-    : Math.max(0, current.balance - cost);
+  const nextBalance = Math.max(0, current.balance - cost);
   if (cost > 0) {
     db.set(`points_${guildId}_${userId}_wallet`, nextBalance);
     db.add(`points_${guildId}_${userId}_spent`, cost);
@@ -928,6 +924,57 @@ function spendPoints(guildId, userId, amount) {
     balance: nextBalance,
     spent: cost,
   };
+}
+
+/**
+ * Reset saldo dompet poin menjadi 0 untuk satu user
+ */
+function resetUserPoints(guildId, userId) {
+  const chatLevel = db.get(`chat_${guildId}_${userId}_level`) || 0;
+  const voiceLevel = db.get(`voice_${guildId}_${userId}_level`) || 0;
+  const chatTotalXp = db.get(`chat_${guildId}_${userId}_totalXp`) || 0;
+  const voiceTotalXp = db.get(`voice_${guildId}_${userId}_totalXp`) || 0;
+  const combinedXp = chatTotalXp + voiceTotalXp;
+
+  const rawGrindPoints =
+    computeTieredLevelPoints(chatLevel) +
+    computeTieredLevelPoints(voiceLevel) +
+    computeMilestoneBonusPoints(chatLevel) +
+    computeMilestoneBonusPoints(voiceLevel) +
+    Math.floor(combinedXp / XP_PER_ACTIVITY_POINT);
+
+  db.set(`points_${guildId}_${userId}_wallet`, 0);
+  db.set(`points_${guildId}_${userId}_lastRaw`, rawGrindPoints);
+  db.set(`points_${guildId}_${userId}_bonus`, 0);
+  db.set(`points_${guildId}_${userId}_spent`, 0);
+  return getPointsData(guildId, userId);
+}
+
+/**
+ * Reset saldo dompet poin seluruh member di satu guild (atau semua guild jika guildId = null) ke 0 Poin
+ */
+function resetAllMemberPoints(guildId = null) {
+  const pairs = new Set();
+  const prefixes = guildId
+    ? [`chat_${guildId}_`, `voice_${guildId}_`, `points_${guildId}_`]
+    : ['chat_', 'voice_', 'points_'];
+
+  for (const prefix of prefixes) {
+    db.forEachPrefix(prefix, (key) => {
+      const m = key.match(/^(?:chat|voice|points)_([^_]+)_([^_]+)_/);
+      if (m) {
+        pairs.add(`${m[1]}_${m[2]}`);
+      }
+    });
+  }
+
+  let resetCount = 0;
+  for (const pair of pairs) {
+    const [gId, uId] = pair.split('_');
+    resetUserPoints(gId, uId);
+    resetCount++;
+  }
+  return resetCount;
 }
 
 /**
@@ -1290,9 +1337,19 @@ function resetOverallLevelCache() {
   }
 }
 
+const POINTS_ZERO_RESET_VERSION = 1;
+
+function resetAllPointsOnStartupOnce() {
+  if (db.get('migration_points_zero_reset_version') === POINTS_ZERO_RESET_VERSION) return;
+  const count = resetAllMemberPoints(null);
+  db.set('migration_points_zero_reset_version', POINTS_ZERO_RESET_VERSION);
+  console.log(`🔄 Points Reset Migration: Reset saldo poin ${count} member ke 0 Poin.`);
+}
+
 // Run startup migrations once on load
 recalibrateAllUsersOnStartup();
 resetOverallLevelCache();
+resetAllPointsOnStartupOnce();
 
 module.exports = {
   MAX_LEVEL,
@@ -1337,6 +1394,8 @@ module.exports = {
   computeMilestoneBonusPoints,
   getSingleMilestoneBonus,
   spendPoints,
+  resetUserPoints,
+  resetAllMemberPoints,
   adjustBonusPoints,
   getCustomRoleConfig,
   getCustomRolePlanInfo,
