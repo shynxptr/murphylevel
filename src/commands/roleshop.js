@@ -189,8 +189,8 @@ module.exports = {
       if (customCfg.enabled) {
         const expText = userCustom
           ? (userCustom.expiresAt
-              ? `• Berakhir <t:${Math.floor(userCustom.expiresAt / 1000)}:R>`
-              : `• **Permanen ♾️**`)
+            ? `• Berakhir <t:${Math.floor(userCustom.expiresAt / 1000)}:R>`
+            : `• **Permanen ♾️**`)
           : '';
         const statusLine = existingCustomRole
           ? `✅ **Role Kamu:** ${existingCustomRole} (\`${userCustom.color}\`) ${expText} • Shared: **${(userCustom.sharedWith || []).length}/${userCustom.maxShares || 0}**\nBuka panel edit dengan \`/roleshop role\` atau ketik \`!role\`, \`!color\`, \`!icon\`, \`!share\`, \`!extend\`.`
@@ -315,8 +315,8 @@ module.exports = {
 
       const expInfo = userCustom
         ? (userCustom.expiresAt
-            ? ` • Expires <t:${Math.floor(userCustom.expiresAt / 1000)}:R>`
-            : ' • **Permanent ♾️**')
+          ? ` • Expires <t:${Math.floor(userCustom.expiresAt / 1000)}:R>`
+          : ' • **Permanent ♾️**')
         : '';
 
       const embed = new EmbedBuilder()
