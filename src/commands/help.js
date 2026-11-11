@@ -42,6 +42,15 @@ function buildGeneralHelpEmbed(guild) {
         inline: false,
       },
       {
+        name: '🟩 Brat Generator (Stiker Teks & Animasi)',
+        value: [
+          '• `fbratt <teks>` atau `/bratt` — Buat gambar Brat background putih (classic)',
+          '• `fbratt --green <teks>` — Buat gambar Brat warna **Hijau Lime** (`--hitam` / `--pink` juga bisa)',
+          '• `fbrattgif <teks>` atau `fbratt --gif <teks>` — Buat **Animasi GIF** kata per kata',
+        ].join('\n'),
+        inline: false,
+      },
+      {
         name: '⚙️ Pengaturan Admin',
         value: [
           '• `/setshop custom-config` — Atur harga paket 7d/14d/28d, limit dompet, kuota role server, & syarat level',

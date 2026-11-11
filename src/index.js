@@ -154,6 +154,7 @@ const {
   handleCustomRoleShortcut,
   checkAndCleanupExpiredCustomRoles,
 } = require('./utils/customRoleComponents');
+const { handleBratMessageCommand } = require('./commands/bratt');
 
 client.on(Events.InteractionCreate, async (interaction) => {
   // Custom Role Panel Interactions (button, modal, user select menu dengan prefix "cr_")
@@ -377,11 +378,33 @@ client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot || !message.guild) return;
 
   const content = message.content.trim();
+
+  // Trigger langsung tanpa prefix: "fbratt <teks>", "fbrat <teks>", "fbrattgif <teks>", "fbratgif <teks>"
+  const directBratMatch = content.match(/^(fbrattgif|fbratgif|fbratt|fbrat)(?:\s+([\s\S]*))?$/i);
+  if (directBratMatch) {
+    const cmdTrigger = directBratMatch[1].toLowerCase();
+    const rawBratText = (directBratMatch[2] || '').trim();
+    const forceGif = cmdTrigger.endsWith('gif');
+    await handleBratMessageCommand(message, rawBratText, forceGif);
+    return;
+  }
+
   if (!content.startsWith(PREFIX)) return;
 
   const args = content.slice(PREFIX.length).trim().split(/\s+/);
   const commandName = args.shift()?.toLowerCase();
   if (!commandName) return;
+
+  // Shortcut Brat via prefix (!bratt, !brat, !fbratt, !fbrat, !brattgif, !bratgif, !fbrattgif, !fbratgif)
+  if (['bratt', 'brat', 'fbratt', 'fbrat', 'brattgif', 'bratgif', 'fbrattgif', 'fbratgif'].includes(commandName)) {
+    const rawBratText = content
+      .slice(PREFIX.length)
+      .trim()
+      .replace(/^[a-zA-Z]+\s*/, '');
+    const forceGif = commandName.endsWith('gif');
+    await handleBratMessageCommand(message, rawBratText, forceGif);
+    return;
+  }
 
   // Shortcut Custom Role (!role, !color, !icon, !share, !unshare, !name, !extend, !shophelp, !rolehelp)
   if (['role', 'customrole', 'myrole', 'color', 'icon', 'share', 'unshare', 'name', 'extend', 'shophelp', 'rolehelp'].includes(commandName)) {
