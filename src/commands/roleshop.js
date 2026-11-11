@@ -10,8 +10,10 @@ const db = require('../utils/database');
 const {
   normalizeHexColor,
   buildRoleUpdatedEmbed,
+  buildShopHelpEmbed,
   buildCustomRoleInfoPayload,
   applyRoleColors,
+  positionRoleBelowBot,
   ensureActiveCustomRole,
 } = require('../utils/customRoleComponents');
 
@@ -434,22 +436,14 @@ module.exports = {
       }
 
       try {
-        const maxSafePos = Math.max(1, botMember.roles.highest.position - 1);
-        let targetPosition = undefined;
-        if (customCfg.anchorRoleId) {
-          const anchorRole = guild.roles.cache.get(customCfg.anchorRoleId);
-          if (anchorRole) {
-            targetPosition = Math.min(anchorRole.position, maxSafePos);
-          }
-        }
-
         const createdRole = await guild.roles.create({
           name: rawName,
           color: primaryHex,
           permissions: [],
-          position: targetPosition,
           reason: `Custom Role (${plan.label}) dibeli oleh ${interaction.user.tag} (${plan.price} Poin)`,
         });
+
+        await positionRoleBelowBot(guild, createdRole, customCfg);
 
         if (sideHex) {
           await applyRoleColors(guild, createdRole, primaryHex, sideHex);

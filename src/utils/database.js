@@ -741,6 +741,7 @@ const DEFAULT_WALLET_CAP = 75;              // Limit maksimal saldo dompet poin 
 const DEFAULT_MAX_SERVER_CUSTOM_ROLES = 75; // Maksimal 75 Custom Role aktif di server (dari ~100 sisa slot role)
 const DEFAULT_MIN_OVERALL_LEVEL = 10;       // Wajib minimal Overall Level 10 untuk membuat Custom Role baru
 const DEFAULT_MAX_DURATION_DAYS = 60;       // Batas maksimal tumpuk durasi perpanjangan (60 Hari)
+const DEFAULT_ANCHOR_ROLE_ID = '1559902612692664332'; // Role bot utama sebagai patokan posisi Custom Role tepat di bawahnya
 const XP_PER_ACTIVITY_POINT = 1500;         // Setiap 1.500 Total XP gabungan dapat +1 Poin grinding berkelanjutan
 
 // Daftar User ID yang diberikan akses khusus Tester Custom Role & Shop (Bypass syarat level, kuota, & auto-saldo poin)
@@ -1046,7 +1047,7 @@ function getCustomRoleConfig(guildId) {
     hoistPrice: typeof cfg.hoistPrice === 'number' && cfg.hoistPrice >= 0 ? cfg.hoistPrice : DEFAULT_HOIST_UNLOCK_PRICE,
     shareSlotPrice: typeof cfg.shareSlotPrice === 'number' && cfg.shareSlotPrice >= 1 ? cfg.shareSlotPrice : DEFAULT_SHARE_SLOT_PRICE,
     maxShareSlots: typeof cfg.maxShareSlots === 'number' && cfg.maxShareSlots >= 1 ? cfg.maxShareSlots : DEFAULT_MAX_SHARE_SLOTS,
-    anchorRoleId: cfg.anchorRoleId || null,
+    anchorRoleId: cfg.anchorRoleId || DEFAULT_ANCHOR_ROLE_ID,
   };
 }
 

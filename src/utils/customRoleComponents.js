@@ -83,6 +83,60 @@ async function applyRoleColors(guild, role, primaryHex, sideHex = null, reason =
 }
 
 /**
+ * Posisikan Custom Role tepat di bawah Role Bot (default ID: 1559902612692664332 atau role tertinggi bot)
+ * sehingga warna & icon role langsung tampil rapi di profil member tanpa perlu digeser manual.
+ */
+async function positionRoleBelowBot(guild, role, cfg = null) {
+  try {
+    const botMember = guild.members.me || await guild.members.fetchMe().catch(() => null);
+    if (!botMember) return role;
+
+    const effectiveCfg = cfg || db.getCustomRoleConfig(guild.id);
+    const highestBotRole = botMember.roles.highest;
+
+    let anchorRole = null;
+    if (effectiveCfg?.anchorRoleId) {
+      anchorRole = guild.roles.cache.get(effectiveCfg.anchorRoleId)
+        || await guild.roles.fetch(effectiveCfg.anchorRoleId).catch(() => null);
+    }
+
+    // Gunakan anchorRole (1559902612692664332) jika ada dan tidak melebihi role tertinggi bot;
+    // jika tidak ditemukan, otomatis gunakan role tertinggi bot
+    if (!anchorRole || anchorRole.position > highestBotRole.position) {
+      anchorRole = highestBotRole;
+    }
+
+    if (!anchorRole || anchorRole.position <= 1) return role;
+
+    // Jika role saat ini berada di bawah anchorRole, target index di discord.js setPosition adalah anchorRole.position - 1
+    // agar role ditempatkan persis 1 tingkat di bawah anchorRole
+    const targetPosition = role.position < anchorRole.position
+      ? Math.max(1, anchorRole.position - 1)
+      : Math.max(1, anchorRole.position);
+
+    if (role.position === targetPosition) return role;
+
+    try {
+      await role.setPosition(targetPosition, {
+        reason: `Auto-position Custom Role tepat di bawah role bot (${anchorRole.name})`,
+      });
+      return role;
+    } catch {
+      // Fallback langsung ke REST API hanya untuk 1 role ini jika cache posisi role lain di server tidak sinkron
+      const rawTarget = Math.max(1, (anchorRole.rawPosition || anchorRole.position) - 1);
+      await guild.client.rest.patch(Routes.guildRoles(guild.id), {
+        body: [{ id: role.id, position: rawTarget }],
+        reason: `Auto-position Custom Role tepat di bawah role bot (${anchorRole.name})`,
+      }).catch(() => {});
+      return role;
+    }
+  } catch (err) {
+    console.warn(`⚠️ Gagal mengatur posisi Custom Role ${role?.name}:`, err.message);
+    return role;
+  }
+}
+
+/**
  * Sinkronkan daftar sharedWith dengan member yang benar-benar masih memegang role di guild
  */
 function syncSharedMembers(guild, role, customData) {
@@ -117,6 +171,12 @@ function ensureActiveCustomRole(guild, ownerId) {
     }
     db.setUserCustomRole(guild.id, ownerId, null);
     return null;
+  }
+
+  // Jika role yang sudah dibuat sebelumnya masih berada di posisi paling bawah, rapikan otomatis di bawah role bot
+  const existingRole = guild.roles.cache.get(customData.roleId);
+  if (existingRole && existingRole.position <= 2) {
+    positionRoleBelowBot(guild, existingRole).catch(() => {});
   }
 
   return customData;
@@ -768,20 +828,14 @@ async function handleCustomRoleInteraction(interaction) {
     }
 
     try {
-      const maxSafePos = Math.max(1, botMember.roles.highest.position - 1);
-      let targetPos = undefined;
-      if (cfg.anchorRoleId) {
-        const anchor = guild.roles.cache.get(cfg.anchorRoleId);
-        if (anchor) targetPos = Math.min(anchor.position, maxSafePos);
-      }
-
       const createdRole = await guild.roles.create({
         name: rawName,
         color: primaryHex,
         permissions: [],
-        position: targetPos,
         reason: `Custom Role (${plan.label}) dibeli oleh ${interaction.user.tag} (${plan.price} Poin)`,
       });
+
+      await positionRoleBelowBot(guild, createdRole, cfg);
 
       if (sideHex) {
         await applyRoleColors(guild, createdRole, primaryHex, sideHex);
@@ -1982,6 +2036,7 @@ module.exports = {
   handleCustomRoleInteraction,
   handleCustomRoleShortcut,
   applyRoleColors,
+  positionRoleBelowBot,
   setRoleIconFromUrl,
   ensureActiveCustomRole,
   checkAndCleanupExpiredCustomRoles,
